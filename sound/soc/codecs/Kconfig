@@ -89,6 +89,8 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_PCM512x_SPI if SPI_MASTER
 	select SND_SOC_RT286 if I2C
 	select SND_SOC_RT298 if I2C
+	select SND_SOC_PCM5102A if I2C
+	select SND_SOC_PCM1794A if I2C
 	select SND_SOC_RT5631 if I2C
 	select SND_SOC_RT5640 if I2C
 	select SND_SOC_RT5645 if I2C
@@ -115,6 +117,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_TFA9879 if I2C
 	select SND_SOC_TLV320AIC23_I2C if I2C
 	select SND_SOC_TLV320AIC23_SPI if SPI_MASTER
+	select SND_SOC_TAS5713 if I2C
 	select SND_SOC_TLV320AIC26 if SPI_MASTER
 	select SND_SOC_TLV320AIC31XX if I2C
 	select SND_SOC_TLV320AIC32X4 if I2C
@@ -549,6 +552,18 @@ config SND_SOC_RT298
 	tristate
 	depends on I2C
 
+config SND_SOC_RT298
+	tristate
+	depends on I2C
+
+config SND_SOC_PCM1794A
+	tristate
+	depends on I2C
+
+config SND_SOC_PCM5102A
+	tristate
+	depends on I2C
+
 config SND_SOC_RT5631
 	tristate "Realtek ALC5631/RT5631 CODEC"
 	depends on I2C
@@ -659,6 +674,9 @@ config SND_SOC_TAS571X
 config SND_SOC_TFA9879
 	tristate "NXP Semiconductors TFA9879 amplifier"
 	depends on I2C
+
+config SND_SOC_TAS5713
+	tristate
 
 config SND_SOC_TLV320AIC23
 	tristate

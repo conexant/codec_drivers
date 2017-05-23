@@ -232,7 +232,7 @@ struct parsed_vndr_ies {
 	struct parsed_vndr_ie_info ie_info[VNDR_IE_PARSE_LIMIT];
 };
 
-static int brcmf_roamoff;
+static int brcmf_roamoff = 1;
 module_param_named(roamoff, brcmf_roamoff, int, S_IRUSR);
 MODULE_PARM_DESC(roamoff, "do not use internal roaming engine");
 
@@ -392,15 +392,23 @@ static int brcmf_vif_change_validate(struct brcmf_cfg80211_info *cfg,
 {
 	int iftype_num[NUM_NL80211_IFTYPES];
 	struct brcmf_cfg80211_vif *pos;
+	bool check_combos = false;
+	int ret = 0;
 
 	memset(&iftype_num[0], 0, sizeof(iftype_num));
 	list_for_each_entry(pos, &cfg->vif_list, list)
-		if (pos == vif)
+		if (pos == vif) {
 			iftype_num[new_type]++;
-		else
+		} else {
+			/* concurrent interfaces so need check combinations */
+			check_combos = true;
 			iftype_num[pos->wdev.iftype]++;
+		}
 
-	return cfg80211_check_combinations(cfg->wiphy, 1, 0, iftype_num);
+	if (check_combos)
+		ret = cfg80211_check_combinations(cfg->wiphy, 1, 0, iftype_num);
+
+	return ret;
 }
 
 static int brcmf_vif_add_validate(struct brcmf_cfg80211_info *cfg,
@@ -1260,17 +1268,17 @@ static void brcmf_link_down(struct brcmf_cfg80211_vif *vif, u16 reason)
 
 	brcmf_dbg(TRACE, "Enter\n");
 
-	if (test_bit(BRCMF_VIF_STATUS_CONNECTED, &vif->sme_state)) {
+	if (test_and_clear_bit(BRCMF_VIF_STATUS_CONNECTED, &vif->sme_state)) {
 		brcmf_dbg(INFO, "Call WLC_DISASSOC to stop excess roaming\n ");
 		err = brcmf_fil_cmd_data_set(vif->ifp,
 					     BRCMF_C_DISASSOC, NULL, 0);
 		if (err) {
 			brcmf_err("WLC_DISASSOC failed (%d)\n", err);
 		}
-		clear_bit(BRCMF_VIF_STATUS_CONNECTED, &vif->sme_state);
-		cfg80211_disconnected(vif->wdev.netdev, reason, NULL, 0,
-				      true, GFP_KERNEL);
-
+		if ((vif->wdev.iftype == NL80211_IFTYPE_STATION) ||
+		    (vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT))
+			cfg80211_disconnected(vif->wdev.netdev, reason, NULL, 0,
+					      true, GFP_KERNEL);
 	}
 	clear_bit(BRCMF_VIF_STATUS_CONNECTING, &vif->sme_state);
 	clear_bit(BRCMF_SCAN_STATUS_SUPPRESS, &cfg->scan_status);
@@ -2570,6 +2578,8 @@ brcmf_cfg80211_set_power_mgmt(struct wiphy *wiphy, struct net_device *ndev,
 	 * preference in cfg struct to apply this to
 	 * FW later while initializing the dongle
 	 */
+	pr_info("power management disabled\n");
+	enabled = false;
 	cfg->pwr_save = enabled;
 	if (!check_vif_up(ifp->vif)) {
 
@@ -2694,8 +2704,8 @@ static s32 brcmf_inform_bss(struct brcmf_cfg80211_info *cfg)
 	return err;
 }
 
-static s32 wl_inform_ibss(struct brcmf_cfg80211_info *cfg,
-			  struct net_device *ndev, const u8 *bssid)
+static s32 brcmf_inform_ibss(struct brcmf_cfg80211_info *cfg,
+			     struct net_device *ndev, const u8 *bssid)
 {
 	struct wiphy *wiphy = cfg_to_wiphy(cfg);
 	struct ieee80211_channel *notify_channel;
@@ -2740,6 +2750,7 @@ static s32 wl_inform_ibss(struct brcmf_cfg80211_info *cfg,
 		band = wiphy->bands[IEEE80211_BAND_5GHZ];
 
 	freq = ieee80211_channel_to_frequency(ch.chnum, band->band);
+	cfg->channel = freq;
 	notify_channel = ieee80211_get_channel(wiphy, freq);
 
 	notify_capability = le16_to_cpu(bi->capability);
@@ -4291,12 +4302,15 @@ static int brcmf_cfg80211_stop_ap(struct wiphy *wiphy, struct net_device *ndev)
 		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_DOWN, 1);
 		if (err < 0)
 			brcmf_err("BRCMF_C_DOWN error %d\n", err);
-		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_AP, 0);
-		if (err < 0)
-			brcmf_err("setting AP mode failed %d\n", err);
+
 		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_INFRA, 0);
 		if (err < 0)
 			brcmf_err("setting INFRA mode failed %d\n", err);
+
+		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_AP, 0);
+		if (err < 0)
+			brcmf_err("setting AP mode failed %d\n", err);
+
 		if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_MBSS))
 			brcmf_fil_iovar_int_set(ifp, "mbss", 0);
 		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_REGULATORY,
@@ -5019,9 +5033,9 @@ brcmf_notify_connect_status(struct brcmf_if *ifp,
 	} else if (brcmf_is_linkup(e)) {
 		brcmf_dbg(CONN, "Linkup\n");
 		if (brcmf_is_ibssmode(ifp->vif)) {
+			brcmf_inform_ibss(cfg, ndev, e->addr);
 			chan = ieee80211_get_channel(cfg->wiphy, cfg->channel);
 			memcpy(profile->bssid, e->addr, ETH_ALEN);
-			wl_inform_ibss(cfg, ndev, e->addr);
 			cfg80211_ibss_joined(ndev, e->addr, chan, GFP_KERNEL);
 			clear_bit(BRCMF_VIF_STATUS_CONNECTING,
 				  &ifp->vif->sme_state);

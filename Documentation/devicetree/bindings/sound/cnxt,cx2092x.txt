@@ -1,0 +1,29 @@
+Conexant CX20921/CX209724 Voice Processor DSP
+
+The devices supports both the I2C and SPI bus.
+
+Required properties:
+
+  - compatible: One of "cnxt,cx20921", "cnxt,cx20924".
+  - reg: The I2C address of the device for I2C, it should be <0x41>
+
+Optional properties:
+
+  - reset-gpios: A GPIO spec to define which pin is connected to the chip's
+		 !RESET pin. If specified, the driver will assert a hardware
+		 reset at probe time.
+
+CODEC input pins:
+  "MIC"	- Microphone input
+
+Example:
+
+codec_i2c: cx20921@41 {
+	compatible = "cnxt,cx20921";
+	reg = <0x41>;
+	reset-gpios = <&gpio1 23 0>;
+};
+
+codec_spi: cx20924@0 {
+	compatible = "cnxt,cx20924";
+};

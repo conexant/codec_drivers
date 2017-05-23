@@ -613,6 +613,8 @@ static const struct sdiod_drive_str sdiod_drvstr_tab2_3v3[] = {
 #define BCM4334_NVRAM_NAME		"brcm/brcmfmac4334-sdio.txt"
 #define BCM43340_FIRMWARE_NAME		"brcm/brcmfmac43340-sdio.bin"
 #define BCM43340_NVRAM_NAME		"brcm/brcmfmac43340-sdio.txt"
+#define BCM43341_FIRMWARE_NAME		"brcm/brcmfmac43341-sdio.bin"
+#define BCM43341_NVRAM_NAME		"brcm/brcmfmac43341-sdio.txt"
 #define BCM4335_FIRMWARE_NAME		"brcm/brcmfmac4335-sdio.bin"
 #define BCM4335_NVRAM_NAME		"brcm/brcmfmac4335-sdio.txt"
 #define BCM43362_FIRMWARE_NAME		"brcm/brcmfmac43362-sdio.bin"
@@ -642,6 +644,8 @@ MODULE_FIRMWARE(BCM4334_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM4334_NVRAM_NAME);
 MODULE_FIRMWARE(BCM43340_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM43340_NVRAM_NAME);
+MODULE_FIRMWARE(BCM43341_FIRMWARE_NAME);
+MODULE_FIRMWARE(BCM43341_NVRAM_NAME);
 MODULE_FIRMWARE(BCM4335_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM4335_NVRAM_NAME);
 MODULE_FIRMWARE(BCM43362_FIRMWARE_NAME);
@@ -679,6 +683,7 @@ static const struct brcmf_firmware_names brcmf_fwname_data[] = {
 	{ BRCM_CC_4330_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4330) },
 	{ BRCM_CC_4334_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4334) },
 	{ BRCM_CC_43340_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM43340) },
+	{ BRCM_CC_43341_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM43341) },
 	{ BRCM_CC_4335_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4335) },
 	{ BRCM_CC_43362_CHIP_ID, 0xFFFFFFFE, BRCMF_FIRMWARE_NVRAM(BCM43362) },
 	{ BRCM_CC_4339_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4339) },
@@ -1471,8 +1476,7 @@ static int brcmf_sdio_hdparse(struct brcmf_sdio *bus, u8 *header,
 		return -ENXIO;
 	}
 	if (rd->seq_num != rx_seq) {
-		brcmf_err("seq %d: sequence number error, expect %d\n",
-			  rx_seq, rd->seq_num);
+		brcmf_dbg(SDIO, "seq %d, expected %d\n", rx_seq, rd->seq_num);
 		bus->sdcnt.rx_badseq++;
 		rd->seq_num = rx_seq;
 	}
@@ -3764,7 +3768,7 @@ brcmf_sdio_drivestrengthinit(struct brcmf_sdio_dev *sdiodev,
 		str_shift = 11;
 		break;
 	default:
-		brcmf_err("No SDIO Drive strength init done for chip %s rev %d pmurev %d\n",
+		brcmf_dbg(INFO, "No SDIO driver strength init needed for chip %s rev %d pmurev %d\n",
 			  ci->name, ci->chiprev, ci->pmurev);
 		break;
 	}

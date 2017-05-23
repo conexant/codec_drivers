@@ -540,12 +540,8 @@ static int ds1337_set_alarm(struct device *dev, struct rtc_wkalrm *t)
 	buf[5] = 0;
 	buf[6] = 0;
 
-	/* optionally enable ALARM1 */
+	/* disable alarms */
 	buf[7] = control & ~(DS1337_BIT_A1IE | DS1337_BIT_A2IE);
-	if (t->enabled) {
-		dev_dbg(dev, "alarm IRQ armed\n");
-		buf[7] |= DS1337_BIT_A1IE;	/* only ALARM1 is used */
-	}
 	buf[8] = status & ~(DS1337_BIT_A1I | DS1337_BIT_A2I);
 
 	ret = ds1307->write_block_data(client,
@@ -553,6 +549,13 @@ static int ds1337_set_alarm(struct device *dev, struct rtc_wkalrm *t)
 	if (ret < 0) {
 		dev_err(dev, "can't set alarm time\n");
 		return ret;
+	}
+
+	/* optionally enable ALARM1 */
+	if (t->enabled) {
+		dev_dbg(dev, "alarm IRQ armed\n");
+		buf[7] |= DS1337_BIT_A1IE;	/* only ALARM1 is used */
+		i2c_smbus_write_byte_data(client, DS1337_REG_CONTROL, buf[7]);
 	}
 
 	return 0;
@@ -860,6 +863,7 @@ static int ds1307_probe(struct i2c_client *client,
 	struct chip_desc	*chip = &chips[id->driver_data];
 	struct i2c_adapter	*adapter = to_i2c_adapter(client->dev.parent);
 	bool			want_irq = false;
+	bool			ds1307_can_wakeup_device = false;
 	unsigned char		*buf;
 	struct ds1307_platform_data *pdata = dev_get_platdata(&client->dev);
 	irq_handler_t	irq_handler = ds1307_irq;
@@ -907,6 +911,20 @@ static int ds1307_probe(struct i2c_client *client,
 		ds1307->write_block_data = ds1307_write_block_data;
 	}
 
+#ifdef CONFIG_OF
+/*
+ * For devices with no IRQ directly connected to the SoC, the RTC chip
+ * can be forced as a wakeup source by stating that explicitly in
+ * the device's .dts file using the "wakeup-source" boolean property.
+ * If the "wakeup-source" property is set, don't request an IRQ.
+ * This will guarantee the 'wakealarm' sysfs entry is available on the device,
+ * if supported by the RTC.
+ */
+	if (of_property_read_bool(client->dev.of_node, "wakeup-source")) {
+		ds1307_can_wakeup_device = true;
+	}
+#endif
+
 	switch (ds1307->type) {
 	case ds_1337:
 	case ds_1339:
@@ -925,11 +943,13 @@ static int ds1307_probe(struct i2c_client *client,
 			ds1307->regs[0] &= ~DS1337_BIT_nEOSC;
 
 		/*
-		 * Using IRQ?  Disable the square wave and both alarms.
+		 * Using IRQ or defined as wakeup-source?
+		 * Disable the square wave and both alarms.
 		 * For some variants, be sure alarms can trigger when we're
 		 * running on Vbackup (BBSQI/BBSQW)
 		 */
-		if (ds1307->client->irq > 0 && chip->alarm) {
+		if (chip->alarm && (ds1307->client->irq > 0 ||
+						ds1307_can_wakeup_device)) {
 			ds1307->regs[0] |= DS1337_BIT_INTCN
 					| bbsqi_bitpos[ds1307->type];
 			ds1307->regs[0] &= ~(DS1337_BIT_A2IE | DS1337_BIT_A1IE);
@@ -1144,6 +1164,14 @@ read_rtc:
 		return PTR_ERR(ds1307->rtc);
 	}
 
+	if (ds1307_can_wakeup_device) {
+		/* Disable request for an IRQ */
+		want_irq = false;
+		dev_info(&client->dev, "'wakeup-source' is set, request for an IRQ is disabled!\n");
+		/* We cannot support UIE mode if we do not have an IRQ line */
+		ds1307->rtc->uie_unsupported = 1;
+	}
+
 	if (want_irq) {
 		err = devm_request_threaded_irq(&client->dev,
 						client->irq, NULL, irq_handler,
@@ -1206,6 +1234,14 @@ static int ds1307_remove(struct i2c_client *client)
 
 	return 0;
 }
+
+#ifdef CONFIG_OF
+static const struct of_device_id ds1307_of_match[] = {
+	{ .compatible = "maxim,ds1307" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, ds1307_of_match);
+#endif
 
 static struct i2c_driver ds1307_driver = {
 	.driver = {
