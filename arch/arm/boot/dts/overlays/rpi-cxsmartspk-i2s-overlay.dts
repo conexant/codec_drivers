@@ -1,0 +1,61 @@
+// Definitions for audioinjector.net audio add on soundcard
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2708";
+
+	fragment@0 {
+		target = <&i2s>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			cx20921@41{
+				#sound-dai-cells = <0>;
+				compatible = "cnxt,cx20924";
+				reg = <0x41>;
+				status = "okay";
+			};
+
+			cx20721@33{
+				#sound-dai-cells = <0>;
+				compatible = "cnxt,cx20721";
+				reg = <0x33>;
+				status = "okay";
+				gpio-cfg = /bits/ 8 <0x00 0x11 0x00
+						     0x11 0x00 0x00>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&sound>;
+		__overlay__ {
+			compatible = "cnxt,cxsmtspk-pi-i2s";
+			i2s-controller = <&i2s>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&jack_det_pins>;
+			status = "okay";
+		};
+	};
+
+	fragment@3 {
+		target = <&gpio>;
+		__overlay__ {
+			jack_det_pins: jack_det_pins {
+				brcm,pins = <25>;
+				brcm,function = <0>; /* in */
+				brcm,pull = <2>; /* upe */
+			};
+		};
+	};
+};

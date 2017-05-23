@@ -40,3 +40,5 @@ obj-$(CONFIG_SND_DIGIDAC1_SOUNDCARD) += snd-soc-digidac1-soundcard.o
 obj-$(CONFIG_SND_BCM2708_SOC_DIONAUDIO_LOCO) += snd-soc-dionaudio-loco.o
 obj-$(CONFIG_SND_BCM2708_SOC_ALLO_PIANO_DAC) += snd-soc-allo-piano-dac.o
 obj-$(CONFIG_SND_PISOUND) += snd-soc-pisound.o
+obj-$(CONFIG_SND_BCM2708_SOC_CXSMTSPK_USB) += snd-soc-cxsmtspk-pi-usb.o
+obj-$(CONFIG_SND_BCM2708_SOC_CXSMTSPK_I2S) += snd-soc-cxsmtspk-pi-i2s.o

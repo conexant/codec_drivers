@@ -1,0 +1,5 @@
+Conexant audio with Smart Speaker I2S codec.
+
+Required properties:
+
+- compatible                            : "cnxt,cxsmtspk-pi-i2s"

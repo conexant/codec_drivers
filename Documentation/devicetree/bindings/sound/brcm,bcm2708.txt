@@ -1,0 +1,3 @@
+Required properties:
+
+- compatible                            : "brcm,bcm2708"
