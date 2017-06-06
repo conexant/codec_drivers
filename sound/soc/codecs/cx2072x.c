@@ -9,10 +9,11 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  15/5/17
- *  File Version:   4.4.57
+ *  Modified Date:  26/5/17
+ *  File Version:   4.4.58
  ************************************************************************/
 #define DEBUG
+#define CODEC_VERSION "4.4.58"
 /*#define ENABLE_MIC_POP_WA*/
 #define CXDBG_REG_DUMP
 
@@ -68,6 +69,11 @@ struct CX2072X_REG_DEF {
 #define RW 0x0300
 #define VO 0x8000
 #define NV 0x0000
+
+#if (KERNEL_VERSION(4, 2, 0) > LINUX_VERSION_CODE)
+static int cx2072x_set_bias_level(struct snd_soc_codec *codec,
+				  enum snd_soc_bias_level level);
+#endif
 
 static const struct CX2072X_REG_DEF cx2072x_regs[] = {
 	_REG(CX2072X_VENDOR_ID,			     4, RO, VO),
@@ -259,6 +265,7 @@ struct cx2072x_priv {
 	u8 plbk_drc[CX2072X_PLBK_DRC_PARM_LEN];
 	u8 classd_amp[CX2072X_CLASSD_AMP_LEN];
 	struct mutex eq_coeff_lock; /* EQ DSP lock */
+	struct mutex cache_only_lock; /* Cache only lock */
 };
 
 /*
@@ -1536,7 +1543,11 @@ static const struct snd_kcontrol_new cx2072x_snd_controls[] = {
 int cx2072x_enable_jack_detect(struct snd_soc_codec *codec)
 {
 	struct cx2072x_priv *cx2072x = snd_soc_codec_get_drvdata(codec);
+#if (KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE)
 	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+#else
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
+#endif
 
 	/*No-sticky input type*/
 	regmap_write(cx2072x->regmap, CX2072X_GPIO_STICKY_MASK, 0x1f);
@@ -1555,7 +1566,7 @@ int cx2072x_enable_jack_detect(struct snd_soc_codec *codec)
 
 	/* Switch MusicD3Live pin to GPIO */
 	regmap_write(cx2072x->regmap, CX2072X_DIGITAL_TEST1, 0);
-
+#if (KERNEL_VERSION(3, 15, 0) <= LINUX_VERSION_CODE)
 	snd_soc_dapm_mutex_lock(dapm);
 
 	snd_soc_dapm_force_enable_pin_unlocked(dapm, "PORTD");
@@ -1563,6 +1574,15 @@ int cx2072x_enable_jack_detect(struct snd_soc_codec *codec)
 	snd_soc_dapm_force_enable_pin_unlocked(dapm, "PortD Mic Bias");
 
 	snd_soc_dapm_mutex_unlock(dapm);
+#else
+	mutex_lock(&codec->mutex);
+
+	snd_soc_dapm_force_enable_pin(dapm, "PORTD");
+	snd_soc_dapm_force_enable_pin(dapm, "Headset Bias");
+	snd_soc_dapm_force_enable_pin(dapm, "PortD Mic Bias");
+
+	mutex_unlock(&codec->mutex);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL_GPL(cx2072x_enable_jack_detect);
@@ -1576,15 +1596,17 @@ int cx2072x_get_jack_state(struct snd_soc_codec *codec)
 {
 	unsigned int jack;
 	unsigned int type = 0;
+	unsigned int int_mask;
 	int  state = 0;
 	struct cx2072x_priv *cx2072x = snd_soc_codec_get_drvdata(codec);
 
-	regcache_cache_bypass(cx2072x->regmap, true);
+	mutex_lock(&cx2072x->cache_only_lock);
+	regcache_cache_only(cx2072x->regmap, false);
 	cx2072x->jack_state = CX_JACK_NONE;
 	regmap_read(cx2072x->regmap, CX2072X_PORTA_PIN_SENSE, &jack);
 	jack = jack >> 24;
 	regmap_read(cx2072x->regmap, CX2072X_DIGITAL_TEST11, &type);
-	regcache_cache_bypass(cx2072x->regmap, false);
+
 	if (jack == 0x80) {
 		type = type >> 8;
 
@@ -1603,7 +1625,10 @@ int cx2072x_get_jack_state(struct snd_soc_codec *codec)
 	}
 
 	/* clear interrupt */
-	regmap_write(cx2072x->regmap, CX2072X_UM_INTERRUPT_CRTL_E, 0x12 << 24);
+	regmap_read(cx2072x->regmap, CX2072X_UM_INTERRUPT_CRTL_E, &int_mask);
+	int_mask = (0x12 << 24) | int_mask;
+	regmap_write(cx2072x->regmap, CX2072X_UM_INTERRUPT_CRTL_E, int_mask);
+	mutex_unlock(&cx2072x->cache_only_lock);
 
 	dev_dbg(codec->dev, "CX2072X_HSDETECT type=0x%X,Jack state = %x\n",
 		type, state);
@@ -1699,8 +1724,11 @@ static void cx2072x_shutdown(struct snd_pcm_substream *substream,
 	regmap_write(cx2072x->regmap, CX2072X_ADC2_POWER_STATE, 3);
 	regmap_write(cx2072x->regmap, CX2072X_DAC1_POWER_STATE, 3);
 	regmap_write(cx2072x->regmap, CX2072X_DAC2_POWER_STATE, 3);
-
+#if (KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE)
 	snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_OFF);
+#else
+	cx2072x_set_bias_level(codec, SND_SOC_BIAS_OFF);
+#endif
 }
 
 #if (KERNEL_VERSION(3, 13, 0) <= LINUX_VERSION_CODE)
@@ -2182,10 +2210,13 @@ static int cx2072x_set_bias_level(struct snd_soc_codec *codec,
 		/* Gracefully shutdwon codec*/
 
 		/*Shutdown codec completely*/
+		mutex_lock(&cx2072x->cache_only_lock);
 		cx2072x_sw_reset(cx2072x);
 		regmap_write(cx2072x->regmap, CX2072X_AFG_POWER_STATE, 3);
 		regcache_mark_dirty(cx2072x->regmap);
 		regcache_cache_only(cx2072x->regmap, true);
+		mutex_unlock(&cx2072x->cache_only_lock);
+
 		cx2072x->plbk_eq_changed = true;
 		cx2072x->plbk_drc_changed = true;
 		if (cx2072x->mclk) {
@@ -2212,7 +2243,7 @@ static int cx2072x_probe(struct snd_soc_codec *codec)
 	codec->control_data = cx2072x->regmap;
 
 
-	dev_dbg(codec->dev, "codec version: 4.4.57\n");
+	dev_dbg(codec->dev, "codec version: %s\n", CODEC_VERSION);
 	regmap_read(cx2072x->regmap, CX2072X_VENDOR_ID, &ven_id);
 	regmap_read(cx2072x->regmap, CX2072X_REVISION_ID, &cx2072x->rev_id);
 	dev_info(codec->dev, "codec version: %08x,%08x\n",
@@ -2260,7 +2291,11 @@ static int cx2072x_probe(struct snd_soc_codec *codec)
 static int cx2072x_remove(struct snd_soc_codec *codec)
 {
 	/*power off device*/
+#if (KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE)
 	snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_OFF);
+#else
+	cx2072x_set_bias_level(codec, SND_SOC_BIAS_OFF);
+#endif
 
 	return 0;
 }
@@ -2469,7 +2504,7 @@ static struct snd_soc_codec_driver soc_codec_driver_cx2072x = {
 #if (KERNEL_VERSION(3, 18, 0) <= LINUX_VERSION_CODE)
 	.suspend_bias_off = false,
 #endif
-	.idle_bias_off = 0,
+	.idle_bias_off = false,
 #if (KERNEL_VERSION(4, 9, 0) <= LINUX_VERSION_CODE)
 	.component_driver = {
 		.controls = cx2072x_snd_controls,
@@ -2600,6 +2635,7 @@ static int cx2072x_i2c_probe(struct i2c_client *i2c,
 	}
 
 	mutex_init(&cx2072x->eq_coeff_lock);
+	mutex_init(&cx2072x->cache_only_lock);
 
 	i2c_set_clientdata(i2c, cx2072x);
 
