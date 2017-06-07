@@ -9,11 +9,11 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  26/5/17
- *  File Version:   4.4.58
+ *  Modified Date:  7/6/17
+ *  File Version:   4.4.59
  ************************************************************************/
 #define DEBUG
-#define CODEC_VERSION "4.4.58"
+#define DRIVER_VERSION "4.4.59"
 /*#define ENABLE_MIC_POP_WA*/
 #define CXDBG_REG_DUMP
 
@@ -266,6 +266,7 @@ struct cx2072x_priv {
 	u8 classd_amp[CX2072X_CLASSD_AMP_LEN];
 	struct mutex eq_coeff_lock; /* EQ DSP lock */
 	struct mutex cache_only_lock; /* Cache only lock */
+	bool codec_power_on;
 };
 
 /*
@@ -1456,6 +1457,49 @@ static int cx2072x_plbk_drc_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int cx2072x_codec_power_switch_info(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 1;
+
+	return 0;
+}
+
+static int cx2072x_codec_power_switch_get(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+#if (KERNEL_VERSION(4, 0, 0) <= LINUX_VERSION_CODE)
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+#else
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+#endif
+	struct cx2072x_priv *cx2072x = snd_soc_codec_get_drvdata(codec);
+
+	ucontrol->value.integer.value[0] = cx2072x->codec_power_on;
+
+	return 0;
+}
+
+static int cx2072x_codec_power_switch_put(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+#if (KERNEL_VERSION(4, 0, 0) <= LINUX_VERSION_CODE)
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+#else
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+#endif
+	const bool power_on = ucontrol->value.integer.value[0];
+
+	if (power_on == 1)
+		snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	else
+		snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_OFF);
+	return 0;
+}
+
 #define CX2072X_PLBK_DRC_COEF(xname) \
 {	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
 	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE, \
@@ -1489,6 +1533,13 @@ static int cx2072x_plbk_drc_put(struct snd_kcontrol *kcontrol,
 	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE, \
 	.info = cx2072x_classd_level_info, \
 	.get = cx2072x_classd_level_get, .put = cx2072x_classd_level_put}
+
+#define CX2072X_CODEC_POWER_CONTROL(xname) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
+	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE, \
+	.info = cx2072x_codec_power_switch_info, \
+	.get = cx2072x_codec_power_switch_get, \
+	.put = cx2072x_codec_power_switch_put}
 
 static const struct snd_kcontrol_new cx2072x_snd_controls[] = {
 
@@ -1533,6 +1584,7 @@ static const struct snd_kcontrol_new cx2072x_snd_controls[] = {
 	SOC_DOUBLE("HPF Switch", CX2072X_CODEC_TEST9, 8, 9, 1, 1),
 	CX2072X_CLASSD_LEVEL("Class-D Output Level"),
 	SOC_SINGLE("PortA HP Amp Switch", CX2072X_PORTA_PIN_CTRL, 7, 1, 0),
+	CX2072X_CODEC_POWER_CONTROL("Power Switch"),
 };
 
 /*
@@ -2202,6 +2254,7 @@ static int cx2072x_set_bias_level(struct snd_soc_codec *codec,
 			regmap_write(cx2072x->regmap,
 				     CX2072X_AFG_POWER_STATE, 0);
 			regcache_sync(cx2072x->regmap);
+			cx2072x->codec_power_on = 1;
 			dev_dbg(codec->dev, "regcache_sync done\n");
 		}
 		break;
@@ -2213,6 +2266,7 @@ static int cx2072x_set_bias_level(struct snd_soc_codec *codec,
 		mutex_lock(&cx2072x->cache_only_lock);
 		cx2072x_sw_reset(cx2072x);
 		regmap_write(cx2072x->regmap, CX2072X_AFG_POWER_STATE, 3);
+		cx2072x->codec_power_on = 0;
 		regcache_mark_dirty(cx2072x->regmap);
 		regcache_cache_only(cx2072x->regmap, true);
 		mutex_unlock(&cx2072x->cache_only_lock);
@@ -2243,7 +2297,7 @@ static int cx2072x_probe(struct snd_soc_codec *codec)
 	codec->control_data = cx2072x->regmap;
 
 
-	dev_dbg(codec->dev, "codec version: %s\n", CODEC_VERSION);
+	dev_dbg(codec->dev, "driver version: %s\n", DRIVER_VERSION);
 	regmap_read(cx2072x->regmap, CX2072X_VENDOR_ID, &ven_id);
 	regmap_read(cx2072x->regmap, CX2072X_REVISION_ID, &cx2072x->rev_id);
 	dev_info(codec->dev, "codec version: %08x,%08x\n",
@@ -2281,6 +2335,7 @@ static int cx2072x_probe(struct snd_soc_codec *codec)
 		return ret;
 	regmap_write(cx2072x->regmap, CX2072X_AFG_POWER_STATE, 3);
 	regcache_cache_only(cx2072x->regmap, true);
+	cx2072x->codec_power_on = 0;
 
 	/* disable clock */
 	if (cx2072x->mclk)
