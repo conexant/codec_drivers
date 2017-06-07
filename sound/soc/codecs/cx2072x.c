@@ -1494,9 +1494,17 @@ static int cx2072x_codec_power_switch_put(struct snd_kcontrol *kcontrol,
 	const bool power_on = ucontrol->value.integer.value[0];
 
 	if (power_on == 1)
+	#if (KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE)
 		snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	#else
+		cx2072x_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	#endif
 	else
+	#if (KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE)
 		snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_OFF);
+	#else
+		cx2072x_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	#endif
 	return 0;
 }
 
