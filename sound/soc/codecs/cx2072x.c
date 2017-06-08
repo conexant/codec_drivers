@@ -9,11 +9,11 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  7/6/17
- *  File Version:   4.4.59
+ *  Modified Date:  8/6/17
+ *  File Version:   4.4.60
  ************************************************************************/
 #define DEBUG
-#define DRIVER_VERSION "4.4.59"
+#define DRIVER_VERSION "4.4.60"
 /*#define ENABLE_MIC_POP_WA*/
 #define CXDBG_REG_DUMP
 
@@ -412,8 +412,8 @@ static const struct reg_default cx2072x_reg_defaults[] = {
 	{ CX2072X_DIGITAL_BIOS_TEST0, 0x001f008a },
 	{ CX2072X_DIGITAL_BIOS_TEST2, 0x00990026 },
 	{ CX2072X_I2SPCM_CONTROL1, 0x00010001 },
-	{ CX2072X_I2SPCM_CONTROL2, 0x00000000 },
-	{ CX2072X_I2SPCM_CONTROL3, 0x00000000 },
+	{ CX2072X_I2SPCM_CONTROL2, 0x0000000f },
+	{ CX2072X_I2SPCM_CONTROL3, 0x0000000f },
 	{ CX2072X_I2SPCM_CONTROL4, 0x00000000 },
 	{ CX2072X_I2SPCM_CONTROL5, 0x00000000 },
 	{ CX2072X_I2SPCM_CONTROL6, 0x00000000 },
@@ -1604,9 +1604,9 @@ int cx2072x_enable_jack_detect(struct snd_soc_codec *codec)
 {
 	struct cx2072x_priv *cx2072x = snd_soc_codec_get_drvdata(codec);
 #if (KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE)
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+	/* struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec); */
 #else
-	struct snd_soc_dapm_context *dapm = &codec->dapm;
+	/* struct snd_soc_dapm_context *dapm = &codec->dapm; */
 #endif
 
 	/*No-sticky input type*/
@@ -1627,21 +1627,17 @@ int cx2072x_enable_jack_detect(struct snd_soc_codec *codec)
 	/* Switch MusicD3Live pin to GPIO */
 	regmap_write(cx2072x->regmap, CX2072X_DIGITAL_TEST1, 0);
 #if (KERNEL_VERSION(3, 15, 0) <= LINUX_VERSION_CODE)
-	snd_soc_dapm_mutex_lock(dapm);
-
-	snd_soc_dapm_force_enable_pin_unlocked(dapm, "PORTD");
-	snd_soc_dapm_force_enable_pin_unlocked(dapm, "Headset Bias");
-	snd_soc_dapm_force_enable_pin_unlocked(dapm, "PortD Mic Bias");
-
-	snd_soc_dapm_mutex_unlock(dapm);
+	/* snd_soc_dapm_mutex_lock(dapm); */
+	/* snd_soc_dapm_force_enable_pin_unlocked(dapm, "PORTD"); */
+	/* snd_soc_dapm_force_enable_pin_unlocked(dapm, "Headset Bias");*/
+	/* snd_soc_dapm_force_enable_pin_unlocked(dapm, "PortD Mic Bias"); */
+	/* snd_soc_dapm_mutex_unlock(dapm); */
 #else
-	mutex_lock(&codec->mutex);
-
-	snd_soc_dapm_force_enable_pin(dapm, "PORTD");
-	snd_soc_dapm_force_enable_pin(dapm, "Headset Bias");
-	snd_soc_dapm_force_enable_pin(dapm, "PortD Mic Bias");
-
-	mutex_unlock(&codec->mutex);
+	/* mutex_lock(&codec->mutex); */
+	/* snd_soc_dapm_force_enable_pin(dapm, "PORTD"); */
+	/* snd_soc_dapm_force_enable_pin(dapm, "Headset Bias"); */
+	/* snd_soc_dapm_force_enable_pin(dapm, "PortD Mic Bias"); */
+	/* mutex_unlock(&codec->mutex); */
 #endif
 	return 0;
 }
@@ -2565,9 +2561,9 @@ static struct snd_soc_codec_driver soc_codec_driver_cx2072x = {
 	.remove = cx2072x_remove,
 	.set_bias_level = cx2072x_set_bias_level,
 #if (KERNEL_VERSION(3, 18, 0) <= LINUX_VERSION_CODE)
-	.suspend_bias_off = false,
+	.suspend_bias_off = true,
 #endif
-	.idle_bias_off = false,
+	.idle_bias_off = true,
 #if (KERNEL_VERSION(4, 9, 0) <= LINUX_VERSION_CODE)
 	.component_driver = {
 		.controls = cx2072x_snd_controls,
