@@ -116,6 +116,10 @@
 /* Pins: P9.24, P9.28, P9.29, P9.31, P9.30 */
 /* #include "am335x-bone-audio-revb.dtsi" */
 
+/* Audio_evk_cx2072x */
+/* Pins: P9.25, P9.28, P9.29, P9.31, P9.30 */
+#include "am335x-bone-audio-cx2072x.dtsi"
+
 /* http://elinux.org/CircuitCo:BeagleBone_LCD3 */
 /* #include "am335x-bone-lcd3-01-00a2.dtsi" */
 
@@ -127,7 +131,9 @@
 /* #include "am335x-bone-lcd7-01-00a2.dtsi" */
 /* #include "am335x-bone-lcd7-01-00a3.dtsi" */
 
-/* http://www.chipsee.com/product/evm/beagle/beaglebone-black-expansion-capacitive.html */
+/* http://www.chipsee.com/product/evm/beagle/
+ * beaglebone-black-expansion-capacitive.html
+ */
 /* #include "am335x-bone-bbb-exp-c.dtsi" */
 
 /* http://elinux.org/CircuitCo:RTC_Cape */

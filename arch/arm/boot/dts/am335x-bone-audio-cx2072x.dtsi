@@ -1,0 +1,99 @@
+/*
+ * Copyright (C) 2012 Texas Instruments Incorporated - http://www.ti.com/
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+
+&am33xx_pinmux {
+	/* audio-revb-jack-det */
+	gpio3_19_jack_det_pins: pinmux_gpio3_19_jack_det_pins {
+		/* mcasp0_fsr.gpio3_19, INPUT | PULLDIS | MODE7 */
+		pinctrl-single,pins = <
+			0x1a4 0x2f
+		>;
+	};
+};
+
+&ocp {
+	P9_19_pinmux {
+		mode = "i2c";
+	};
+	P9_20_pinmux {
+		mode = "i2c";
+	};
+
+	/* The following are disabled because the audio mode is set
+	 * by <&mcasp0_pins_audio_revb>.
+	 */
+	P9_25_pinmux {
+		/* mcasp0_ahclkx, OUTPUT | MODE0, Codec MCLK */
+		status = "disabled";
+	};
+	P9_28_pinmux {
+		/* mcasp0_axr2, INPUT | MODE2, Codec DIN */
+		status = "disabled";
+	};
+	P9_29_pinmux {
+		/* mcasp0_fsx, INPUT | MODE0, Codec WCLK */
+		status = "disabled";
+	};
+	P9_30_pinmux {
+		/* mcasp0_axr0, INPUT | MODE0, Codec DOUT */
+		status = "disabled";
+		/* TODO Add support in am335x-bone-common-pinmux.dtsi
+		 * for an "audio" mode.
+		 */
+	};
+	P9_31_pinmux {
+		/* mcasp0_aclkx, INPUT | MODE0, Codec BCLK */
+		status = "disabled";
+	};
+	P9_27_pinmux {
+		/* gpio3_19, INPUT | PULLDIS | MODE7 */
+		status = "disabled";
+	};
+};
+
+&i2c2 {
+	cx2072x: cx2072x@33 {
+		compatible = "cnxt,cx20721";
+		reg = <0x33>;
+		status = "okay";
+	};
+};
+
+&mcasp0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mcasp0_pins_audio_revb>;
+	status = "okay";
+	op-mode = <0>;          /* MCASP_IIS_MODE */
+	tdm-slots = <2>;
+	num-serializer = <16>;
+	serial-dir = <  /* 0: INACTIVE, 1: TX, 2: RX */
+		2 0 1 0
+		0 0 0 0
+		0 0 0 0
+		0 0 0 0
+	>;
+	tx-num-evt = <1>;
+	rx-num-evt = <1>;
+};
+
+/ {
+	sound {
+		compatible = "cnxt,cx2072x-evk-audio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&gpio3_19_jack_det_pins>;
+		ti,model = "CX2072X EVK";
+		ti,audio-codec = <&cx2072x>;
+		ti,mcasp-controller = <&mcasp0>;
+		ti,codec-clock-rate = <24000000>;
+		ti,hp-det-gpio = <&gpio3 19 0x1>;
+		ti,audio-routing =
+			"Headphone Jack",	"PORTA",
+			"Ext Spk",	"PORTG",
+			"PORTB", "Headset Mic";
+	};
+};

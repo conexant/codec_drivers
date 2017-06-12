@@ -8,7 +8,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
+#define DEBUG
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/timer.h>
@@ -27,14 +27,46 @@
 #include <asm/mach-types.h>
 
 #include <linux/edma.h>
+#include <linux/version.h>
+#include <linux/of_gpio.h>
+#include <sound/jack.h>
 
 #include "davinci-pcm.h"
 #include "davinci-i2s.h"
+#include "../codecs/cx2072x.h"
+
+static int jack_gpio_detect_hp(void *);
+
+static struct snd_soc_jack_gpio csmtspk_bbb_hp_jack_gpio = {
+	.name = "Headphone detection",
+	.report = SND_JACK_HEADPHONE,
+	.debounce_time = 150,
+	.gpio = 115,
+	.invert = 1,
+	.jack_status_check = jack_gpio_detect_hp,
+};
 
 struct snd_soc_card_drvdata_davinci {
 	struct clk *mclk;
-	unsigned sysclk;
+	unsigned int sysclk;
+	int gpio_hp_det;
+	int gpio_hp_det_invert;
+	struct snd_soc_jack csmtspk_bbb_hp_jack;
 };
+
+static int jack_gpio_detect_hp(void *data)
+{
+	int jack_type = 0;
+	struct snd_soc_jack_gpio *gpio = &csmtspk_bbb_hp_jack_gpio;
+	struct snd_soc_jack *jack = gpio->jack;
+	struct snd_soc_codec *codec = jack->codec;
+
+	jack_type = cx2072x_get_jack_state(codec);
+	pr_debug("Detected jack changed, type =%d\n", jack_type);
+
+	return jack_type;
+}
+
 
 static int evm_startup(struct snd_pcm_substream *substream)
 {
@@ -68,8 +100,8 @@ static int evm_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct snd_soc_card *soc_card = rtd->card;
 	int ret = 0;
-	unsigned sysclk = ((struct snd_soc_card_drvdata_davinci *)
-			   snd_soc_card_get_drvdata(soc_card))->sysclk;
+	unsigned int sysclk = ((struct snd_soc_card_drvdata_davinci *)
+				snd_soc_card_get_drvdata(soc_card))->sysclk;
 
 	/* set the codec system clock */
 	ret = snd_soc_dai_set_sysclk(codec_dai, 0, sysclk, SND_SOC_CLOCK_OUT);
@@ -85,7 +117,8 @@ static int evm_hw_params(struct snd_pcm_substream *substream,
 }
 
 /* If changing sample format the tda998x configuration (REG_CTS_N) needs
-   to be changed. */
+ *  to be changed.
+ */
 #define TDA998X_SAMPLE_FORMAT SNDRV_PCM_FORMAT_S32_LE
 static int evm_tda998x_startup(struct snd_pcm_substream *substream)
 {
@@ -101,7 +134,7 @@ static int evm_tda998x_startup(struct snd_pcm_substream *substream)
 
 static struct snd_soc_ops evm_ops = {
 	.startup = evm_startup,
-	.shutdown = evm_shutdown,
+	/* .shutdown = evm_shutdown, */
 	.hw_params = evm_hw_params,
 };
 
@@ -116,12 +149,19 @@ static struct snd_soc_ops dra7xx_ops = {
 	.shutdown = evm_shutdown,
 };
 
-/* davinci-evm machine dapm widgets */
+/* davinci-evm machine dapm widgets for aic3x */
 static const struct snd_soc_dapm_widget aic3x_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
 	SND_SOC_DAPM_LINE("Line Out", NULL),
 	SND_SOC_DAPM_MIC("Mic Jack", NULL),
 	SND_SOC_DAPM_LINE("Line In", NULL),
+};
+
+/* davinci-evm machine dapm widgets for cx2072x */
+static const struct snd_soc_dapm_widget cx2072x_dapm_widgets[] = {
+	SND_SOC_DAPM_HP("Headphone Jack", NULL),
+	SND_SOC_DAPM_SPK("Ext Spk", NULL),
+	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 };
 
 /* davinci-evm machine audio_mapnections to the codec pins */
@@ -146,16 +186,64 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"LINE2R", NULL, "Line In"},
 };
 
+/* Logic for a cx2072x as connected on a davinci-evm */
+static int evm_cx2072x_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dapm_context *dapm = &card->dapm;
+
+	struct device_node *np = card->dev->of_node;
+	int ret;
+
+	struct snd_soc_card_drvdata_davinci *drvdata =
+		snd_soc_card_get_drvdata(card);
+
+	/* Add davinci-evm specific widgets */
+	snd_soc_dapm_new_controls(dapm, cx2072x_dapm_widgets,
+				  ARRAY_SIZE(cx2072x_dapm_widgets));
+
+	if (np) {
+		ret = snd_soc_of_parse_audio_routing(card, "ti,audio-routing");
+		if (ret)
+			return ret;
+	} else {
+		/* Set up davinci-evm specific audio path audio_map */
+		snd_soc_dapm_add_routes(&card->dapm, audio_map,
+					ARRAY_SIZE(audio_map));
+	}
+
+	snd_soc_dai_set_bclk_ratio(rtd->codec_dai, 32);
+	snd_soc_dai_set_sysclk(rtd->codec_dai, 1, drvdata->sysclk,
+			       SND_SOC_CLOCK_IN);
+
+	/* It's not necessary for 2072x, take off the pin */
+	snd_soc_dapm_disable_pin(&codec->dapm, "AEC REF");
+
+	/* Add jack sense detection */
+	cx2072x_enable_jack_detect(codec);
+	snd_soc_jack_new(codec, "BeagleBone Audio Jack", SND_JACK_HEADPHONE,
+			 &drvdata->csmtspk_bbb_hp_jack);
+
+	csmtspk_bbb_hp_jack_gpio.gpio = drvdata->gpio_hp_det;
+	csmtspk_bbb_hp_jack_gpio.invert = drvdata->gpio_hp_det_invert;
+	snd_soc_jack_add_gpios(&drvdata->csmtspk_bbb_hp_jack, 1,
+			       &csmtspk_bbb_hp_jack_gpio);
+
+	return 0;
+}
+
 /* Logic for a aic3x as connected on a davinci-evm */
 static int evm_aic3x_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dapm_context *dapm = &rtd->codec->dapm;
 	struct device_node *np = card->dev->of_node;
 	int ret;
 
 	/* Add davinci-evm specific widgets */
-	snd_soc_dapm_new_controls(&card->dapm, aic3x_dapm_widgets,
+	snd_soc_dapm_new_controls(dapm, aic3x_dapm_widgets,
 				  ARRAY_SIZE(aic3x_dapm_widgets));
 
 	if (np) {
@@ -289,7 +377,7 @@ static struct snd_soc_dai_link dm6467_evm_dai[] = {
 	{
 		.name = "TLV320AIC3X",
 		.stream_name = "AIC3X",
-		.cpu_dai_name= "davinci-mcasp.0",
+		.cpu_dai_name = "davinci-mcasp.0",
 		.codec_dai_name = "tlv320aic3x-hifi",
 		.platform_name = "davinci-mcasp.0",
 		.codec_name = "tlv320aic3x-codec.0-001a",
@@ -301,7 +389,7 @@ static struct snd_soc_dai_link dm6467_evm_dai[] = {
 	{
 		.name = "McASP",
 		.stream_name = "spdif",
-		.cpu_dai_name= "davinci-mcasp.1",
+		.cpu_dai_name = "davinci-mcasp.1",
 		.codec_dai_name = "dit-hifi",
 		.codec_name = "spdif_dit",
 		.platform_name = "davinci-mcasp.1",
@@ -326,7 +414,7 @@ static struct snd_soc_dai_link da830_evm_dai = {
 static struct snd_soc_dai_link da850_evm_dai = {
 	.name = "TLV320AIC3X",
 	.stream_name = "AIC3X",
-	.cpu_dai_name= "davinci-mcasp.0",
+	.cpu_dai_name = "davinci-mcasp.0",
 	.codec_dai_name = "tlv320aic3x-hifi",
 	.codec_name = "tlv320aic3x-codec.1-0018",
 	.platform_name = "davinci-mcasp.0",
@@ -424,6 +512,16 @@ static struct snd_soc_card da850_snd_soc_card = {
  * The structs are used as place holders. They will be completely
  * filled with data from dt node.
  */
+static struct snd_soc_dai_link evk_dai_cx2072x = {
+	.name			= "CX2072X",
+	.stream_name	= "CX2072X Playback",
+	.codec_dai_name	= "cx2072x-hifi",
+	.ops			= &evm_ops,
+	.init			= evm_cx2072x_init,
+	.dai_fmt		= (SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_I2S |
+				   SND_SOC_DAIFMT_IB_NF),
+};
+
 static struct snd_soc_dai_link evm_dai_tlv320aic3x = {
 	.name		= "TLV320AIC3X",
 	.stream_name	= "AIC3X",
@@ -467,6 +565,10 @@ static const struct of_device_id davinci_evm_dt_ids[] = {
 		.compatible = "ti,dra7xx-evm-audio",
 		.data = (void *) &dra7xx_evm_link,
 	},
+	{
+		.compatible = "cnxt,cx2072x-evk-audio",
+		.data = &evk_dai_cx2072x,
+	},
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, davinci_evm_dt_ids);
@@ -486,6 +588,7 @@ static int davinci_evm_probe(struct platform_device *pdev)
 	struct snd_soc_card_drvdata_davinci *drvdata = NULL;
 	struct clk *mclk;
 	int ret = 0;
+	enum of_gpio_flags flags;
 
 	evm_soc_card.dai_link = dai;
 
@@ -531,13 +634,23 @@ static int davinci_evm_probe(struct platform_device *pdev)
 		drvdata->sysclk = clk_get_rate(drvdata->mclk);
 	} else if (drvdata->mclk) {
 		unsigned int requestd_rate = drvdata->sysclk;
+
 		clk_set_rate(drvdata->mclk, drvdata->sysclk);
 		drvdata->sysclk = clk_get_rate(drvdata->mclk);
 		if (drvdata->sysclk != requestd_rate)
 			dev_warn(&pdev->dev,
 				 "Could not get requested rate %u using %u.\n",
 				 requestd_rate, drvdata->sysclk);
+
+		if (drvdata->mclk)
+			clk_prepare_enable(drvdata->mclk);
 	}
+
+	drvdata->gpio_hp_det = of_get_named_gpio_flags(np, "ti,hp-det-gpio",
+						       0, &flags);
+	drvdata->gpio_hp_det_invert = !!(flags & OF_GPIO_ACTIVE_LOW);
+	dev_dbg(&pdev->dev, "Get gpio num: %d, flags:%d\n",
+		drvdata->gpio_hp_det, drvdata->gpio_hp_det_invert);
 
 	snd_soc_card_set_drvdata(&evm_soc_card, drvdata);
 	ret = devm_snd_soc_register_card(&pdev->dev, &evm_soc_card);

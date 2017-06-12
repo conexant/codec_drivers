@@ -1,0 +1,20 @@
+Conexant System - cx2072x audio codec.
+
+Required properties:
+
+- compatible - "string" - One of:
+    "cnxt,cx2072x-evk-audio" - cx2072x audio codec device
+
+
+Optional properties:
+
+- ti,hp-det-gpio - gpio pin number used for jack detection notification
+- ti,codec-clock-rate - system clock used for codec's MCLK rate
+
+Example:
+
+sound {
+	compatible = "cnxt,cx2072x-evm-audio";
+	ti,codec-clock-rate = <24000000>;
+	ti,hp-det-gpio = <&gpio3 19 0x1>;
+};
