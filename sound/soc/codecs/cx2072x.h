@@ -9,8 +9,8 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  8/6/17
- *  File Version:   4.4.60
+ *  Modified Date:  14/6/17
+ *  File Version:   4.4.61
  ************************************************************************/
 #define NUM_OF_DAI 1
 #define CX2072X_MCLK_PLL 1

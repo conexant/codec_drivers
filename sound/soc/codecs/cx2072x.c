@@ -9,11 +9,11 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  8/6/17
- *  File Version:   4.4.60
+ *  Modified Date:  14/6/17
+ *  File Version:   4.4.61
  ************************************************************************/
 #define DEBUG
-#define DRIVER_VERSION "4.4.60"
+#define DRIVER_VERSION "4.4.61"
 /*#define ENABLE_MIC_POP_WA*/
 #define CXDBG_REG_DUMP
 
@@ -1761,32 +1761,6 @@ static int cx2072x_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static void cx2072x_shutdown(struct snd_pcm_substream *substream,
-			    struct snd_soc_dai *dai)
-{
-	struct snd_soc_codec *codec = dai->codec;
-	struct cx2072x_priv *cx2072x = snd_soc_codec_get_drvdata(codec);
-
-	/* shutdown codec. */
-	regcache_cache_only(cx2072x->regmap, false);
-	regmap_write(cx2072x->regmap, CX2072X_PORTA_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_PORTB_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_PORTC_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_PORTD_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_PORTE_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_PORTG_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_MIXER_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_ADC1_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_ADC2_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_DAC1_POWER_STATE, 3);
-	regmap_write(cx2072x->regmap, CX2072X_DAC2_POWER_STATE, 3);
-#if (KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE)
-	snd_soc_codec_force_bias_level(codec, SND_SOC_BIAS_OFF);
-#else
-	cx2072x_set_bias_level(codec, SND_SOC_BIAS_OFF);
-#endif
-}
-
 #if (KERNEL_VERSION(3, 13, 0) <= LINUX_VERSION_CODE)
 static int cx2072x_set_dai_bclk_ratio(struct snd_soc_dai *dai,
 				     unsigned int ratio)
@@ -2590,7 +2564,6 @@ static struct snd_soc_dai_ops cx2072x_dai_ops = {
 	.set_sysclk = cx2072x_set_dai_sysclk,
 	.set_fmt = cx2072x_set_dai_fmt,
 	.hw_params = cx2072x_hw_params,
-	.shutdown = cx2072x_shutdown,
 #if (KERNEL_VERSION(3, 13, 0) <= LINUX_VERSION_CODE)
 	.set_bclk_ratio = cx2072x_set_dai_bclk_ratio,
 #endif
