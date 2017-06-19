@@ -13,7 +13,6 @@ patch_head="$(git rev-parse HEAD^{commit})"
 [ "$?" -eq 0 ] || exit $?;
 echo "Build Beagle Bone Black kernel starts now"
 echo "default configuration = $MAKE_DEF_CONFIG"
-export PATH="/opt/linaro/gcc-linaro-arm-linux-gnueabihf-4.7/bin:$PATH"
 echo "PATH = $PATH"
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- $MAKE_DEF_CONFIG
 [ "$?" -eq 0 ] || exit $?;

@@ -14,14 +14,16 @@ DIR=$PWD
 image="zImage"
 vmlinuz="vmlinuz"
 KERNEL_ARCH=arm
-CC=arm-linux-gnueabi-
+CC=arm-linux-gnueabihf-
 mkdir -p "${DIR}/deploy/boot/dtbs/"
 
-# copy kernel release version to version
+# copy kernel release version to kernel_version
 cp ${DIR}/include/config/kernel.release ${DIR}/kernel_version
+[ "$?" -eq 0 ] || exit $?;
 
 # cat current kernel release version
 temp_string=$(cat "${DIR}/include/generated/utsrelease.h")
+[ "$?" -eq 0 ] || exit $?;
 KERNEL_UTS=$(echo ${temp_string} | awk '{print $3}' | sed 's/\"//g')
 
 echo "uname_r=$KERNEL_UTS" > ${DIR}/deploy/boot/uEnv.txt
@@ -40,10 +42,13 @@ echo "Installing kernel modules and copy dtbs.."
 
 make -s ARCH="${KERNEL_ARCH}" CROSS_COMPILE="${CC}" modules_install \
 INSTALL_MOD_PATH="${DIR}/deploy/"
+[ "$?" -eq 0 ] || exit $?;
 
 mkdir -p "${DIR}/deploy/boot/dtbs/${KERNEL_UTS}"
 cp ${DIR}/arch/${KERNEL_ARCH}/boot/dts/*.dtb \
 "${DIR}/deploy/boot/dtbs/${KERNEL_UTS}"
+[ "$?" -eq 0 ] || exit $?;
+
 
 rm -rf deploy/lib/firmware
 
@@ -53,5 +58,6 @@ tar_options="--create --gzip --file"
 echo "Compressing ${KERNEL_UTS}${deployfile}..."
 cd "${DIR}/deploy" || true
 tar ${tar_options} "../${KERNEL_UTS}${deployfile}" ./*
+[ "$?" -eq 0 ] || exit $?;
 cd ..
 
