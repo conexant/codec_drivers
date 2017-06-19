@@ -1,5 +1,15 @@
 #!/bin/bash
 
+#  pack script for preparing related updated files
+#
+#  Copyright:	(C) 2017 Conexant Systems, LLC.
+#  Author:	Aimar Liu, <aimar.liu@conexant.com>
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License version 2 as
+#  published by the Free Software Foundation.
+#
+
 DIR=$PWD
 image="zImage"
 vmlinuz="vmlinuz"
@@ -11,8 +21,8 @@ mkdir -p "${DIR}/deploy/boot/dtbs/"
 cp ${DIR}/include/config/kernel.release ${DIR}/kernel_version
 
 # cat current kernel release version
-KERNEL_UTS=$(cat "${DIR}/include/generated/utsrelease.h" | awk '{print $3}' | \
-sed 's/\"//g' )
+temp_string=$(cat "${DIR}/include/generated/utsrelease.h")
+KERNEL_UTS=$(echo ${temp_string} | awk '{print $3}' | sed 's/\"//g')
 
 echo "uname_r=$KERNEL_UTS" > ${DIR}/deploy/boot/uEnv.txt
 
