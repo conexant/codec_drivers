@@ -9,8 +9,8 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  14/6/17
- *  File Version:   4.4.61
+ *  Modified Date:  28/6/17
+ *  File Version:   4.4.62
  ************************************************************************/
 #define NUM_OF_DAI 1
 #define CX2072X_MCLK_PLL 1
@@ -182,13 +182,6 @@
 #define CX2072X_DAI_DSP  2
 /*4 ch, including mic and aec*/
 #define CX2072X_DAI_DSP_PWM 3
-
-enum cx2072x_jack_types {
-	CX_JACK_NONE = 0x0000,
-	CX_JACK_HEADPHONE = 0x0001,
-	CX_JACK_APPLE_HEADSET = 0x0002,
-	CX_JACK_NOKIE_HEADSET = 0x0003,
-};
 
 enum REG_SAMPLE_SIZE {
 	SAMPLE_SIZE_8_BITS = 0,

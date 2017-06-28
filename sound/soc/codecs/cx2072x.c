@@ -9,11 +9,11 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  14/6/17
- *  File Version:   4.4.61
+ *  Modified Date:  28/6/17
+ *  File Version:   4.4.62
  ************************************************************************/
 #define DEBUG
-#define DRIVER_VERSION "4.4.61"
+#define DRIVER_VERSION "4.4.62"
 /*#define ENABLE_MIC_POP_WA*/
 #define CXDBG_REG_DUMP
 
@@ -236,7 +236,6 @@ struct cx2072x_priv {
 	bool jack_mic;
 	int jack_mode;
 	int jack_flips;
-	unsigned int jack_state;
 	int audsmt_enable;
 	unsigned int bclk_ratio;
 #ifdef ENABLE_MIC_POP_WA
@@ -1658,7 +1657,6 @@ int cx2072x_get_jack_state(struct snd_soc_codec *codec)
 
 	mutex_lock(&cx2072x->cache_only_lock);
 	regcache_cache_only(cx2072x->regmap, false);
-	cx2072x->jack_state = CX_JACK_NONE;
 	regmap_read(cx2072x->regmap, CX2072X_PORTA_PIN_SENSE, &jack);
 	jack = jack >> 24;
 	regmap_read(cx2072x->regmap, CX2072X_DIGITAL_TEST11, &type);
@@ -1668,15 +1666,10 @@ int cx2072x_get_jack_state(struct snd_soc_codec *codec)
 
 		if (type & 0x8) {
 			state |= SND_JACK_HEADSET;
-			cx2072x->jack_state = CX_JACK_APPLE_HEADSET;
 			if (type & 0x2)
 				state |= SND_JACK_BTN_0;
-		} else if (type & 0x4) {
-			state |= SND_JACK_HEADPHONE;
-			cx2072x->jack_state = CX_JACK_NOKIE_HEADSET;
 		} else {
 			state |= SND_JACK_HEADPHONE;
-			cx2072x->jack_state = CX_JACK_HEADPHONE;
 		}
 	}
 
