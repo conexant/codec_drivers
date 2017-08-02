@@ -23,6 +23,13 @@
 
 #include "omap_drv.h"
 
+#define OMAP_DRM_MODE_FLAG_DATA_RISING	(1 << 24)
+#define OMAP_DRM_MODE_FLAG_DATA_FALLING	(1 << 25)
+#define OMAP_DRM_MODE_FLAG_SYNC_RISING	(1 << 26)
+#define OMAP_DRM_MODE_FLAG_SYNC_FALLING	(1 << 27)
+#define OMAP_DRM_MODE_FLAG_PDE		(1 << 28)
+#define OMAP_DRM_MODE_FLAG_NDE		(1 << 29)
+
 /*
  * connector funcs
  */
@@ -35,6 +42,17 @@ struct omap_connector {
 	struct drm_encoder *encoder;
 	bool hdmi_mode;
 };
+
+void omap_connector_hpd_cb(void *cb_data, enum drm_connector_status status)
+{
+	struct omap_connector *omap_connector = cb_data;
+	struct drm_connector *connector = &omap_connector->base;
+
+	if (connector->status != status) {
+		connector->status = status;
+		drm_kms_helper_hotplug_event(omap_connector->base.dev);
+	}
+}
 
 bool omap_connector_get_hdmi_mode(struct drm_connector *connector)
 {
@@ -63,6 +81,9 @@ void copy_timings_omap_to_drm(struct drm_display_mode *mode,
 	if (timings->interlace)
 		mode->flags |= DRM_MODE_FLAG_INTERLACE;
 
+	if (timings->double_pixel)
+		mode->flags |= DRM_MODE_FLAG_DBLCLK;
+
 	if (timings->hsync_level == OMAPDSS_SIG_ACTIVE_HIGH)
 		mode->flags |= DRM_MODE_FLAG_PHSYNC;
 	else
@@ -72,6 +93,21 @@ void copy_timings_omap_to_drm(struct drm_display_mode *mode,
 		mode->flags |= DRM_MODE_FLAG_PVSYNC;
 	else
 		mode->flags |= DRM_MODE_FLAG_NVSYNC;
+
+	if (timings->data_pclk_edge == OMAPDSS_DRIVE_SIG_RISING_EDGE)
+		mode->flags |= OMAP_DRM_MODE_FLAG_DATA_RISING;
+	else
+		mode->flags |= OMAP_DRM_MODE_FLAG_DATA_FALLING;
+
+	if (timings->sync_pclk_edge == OMAPDSS_DRIVE_SIG_RISING_EDGE)
+		mode->flags |= OMAP_DRM_MODE_FLAG_SYNC_RISING;
+	else
+		mode->flags |= OMAP_DRM_MODE_FLAG_SYNC_FALLING;
+
+	if (timings->de_level == OMAPDSS_SIG_ACTIVE_HIGH)
+		mode->flags |= OMAP_DRM_MODE_FLAG_PDE;
+	else
+		mode->flags |= OMAP_DRM_MODE_FLAG_NDE;
 }
 
 void copy_timings_drm_to_omap(struct omap_video_timings *timings,
@@ -90,6 +126,7 @@ void copy_timings_drm_to_omap(struct omap_video_timings *timings,
 	timings->vbp = mode->vtotal - mode->vsync_end;
 
 	timings->interlace = !!(mode->flags & DRM_MODE_FLAG_INTERLACE);
+	timings->double_pixel = !!(mode->flags & DRM_MODE_FLAG_DBLCLK);
 
 	if (mode->flags & DRM_MODE_FLAG_PHSYNC)
 		timings->hsync_level = OMAPDSS_SIG_ACTIVE_HIGH;
@@ -101,9 +138,20 @@ void copy_timings_drm_to_omap(struct omap_video_timings *timings,
 	else
 		timings->vsync_level = OMAPDSS_SIG_ACTIVE_LOW;
 
-	timings->data_pclk_edge = OMAPDSS_DRIVE_SIG_RISING_EDGE;
-	timings->de_level = OMAPDSS_SIG_ACTIVE_HIGH;
-	timings->sync_pclk_edge = OMAPDSS_DRIVE_SIG_FALLING_EDGE;
+	if (mode->flags & OMAP_DRM_MODE_FLAG_DATA_RISING)
+		timings->data_pclk_edge = OMAPDSS_DRIVE_SIG_RISING_EDGE;
+	else
+		timings->data_pclk_edge = OMAPDSS_DRIVE_SIG_FALLING_EDGE;
+
+	if (mode->flags & OMAP_DRM_MODE_FLAG_SYNC_RISING)
+		timings->sync_pclk_edge = OMAPDSS_DRIVE_SIG_RISING_EDGE;
+	else
+		timings->sync_pclk_edge = OMAPDSS_DRIVE_SIG_FALLING_EDGE;
+
+	if (mode->flags & OMAP_DRM_MODE_FLAG_PDE)
+		timings->de_level = OMAPDSS_SIG_ACTIVE_HIGH;
+	else
+		timings->de_level = OMAPDSS_SIG_ACTIVE_LOW;
 }
 
 static enum drm_connector_status omap_connector_detect(
@@ -139,6 +187,9 @@ static void omap_connector_destroy(struct drm_connector *connector)
 	struct omap_dss_device *dssdev = omap_connector->dssdev;
 
 	DBG("%s", omap_connector->dssdev->name);
+	if (connector->polled == DRM_CONNECTOR_POLL_HPD &&
+	    dssdev->driver->disable_hpd)
+		dssdev->driver->disable_hpd(dssdev);
 	drm_connector_unregister(connector);
 	drm_connector_cleanup(connector);
 	kfree(omap_connector);
@@ -282,6 +333,7 @@ struct drm_connector *omap_connector_init(struct drm_device *dev,
 {
 	struct drm_connector *connector = NULL;
 	struct omap_connector *omap_connector;
+	bool hpd_supported = false;
 
 	DBG("%s", dssdev->name);
 
@@ -300,13 +352,24 @@ struct drm_connector *omap_connector_init(struct drm_device *dev,
 				connector_type);
 	drm_connector_helper_add(connector, &omap_connector_helper_funcs);
 
-#if 0 /* enable when dss2 supports hotplug */
-	if (dssdev->caps & OMAP_DSS_DISPLAY_CAP_HPD)
-		connector->polled = 0;
-	else
-#endif
+	if (dssdev->driver->enable_hpd) {
+		int ret = dssdev->driver->enable_hpd(dssdev,
+						     omap_connector_hpd_cb,
+						     omap_connector);
+		if (!ret)
+			hpd_supported = true;
+		else if (ret != -ENOTSUPP)
+			DBG("%s: enable_hpd failed (%d). HPD will be disabled",
+			    dssdev->name, ret);
+	}
+
+	if (hpd_supported)
+		connector->polled = DRM_CONNECTOR_POLL_HPD;
+	else if (dssdev->driver->detect)
 		connector->polled = DRM_CONNECTOR_POLL_CONNECT |
-				DRM_CONNECTOR_POLL_DISCONNECT;
+				    DRM_CONNECTOR_POLL_DISCONNECT;
+	else
+		connector->polled = 0;
 
 	connector->interlace_allowed = 1;
 	connector->doublescan_allowed = 0;

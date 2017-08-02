@@ -274,7 +274,7 @@ static void omap8250_restore_regs(struct uart_8250_port *up)
 	serial_out(up, UART_EFR, UART_EFR_ECB);
 
 	serial_out(up, UART_LCR, UART_LCR_CONF_MODE_A);
-	serial_out(up, UART_MCR, UART_MCR_TCRTLR);
+	serial8250_out_MCR(up, UART_MCR_TCRTLR);
 	serial_out(up, UART_FCR, up->fcr);
 
 	omap8250_update_scr(up, priv);
@@ -290,7 +290,7 @@ static void omap8250_restore_regs(struct uart_8250_port *up)
 	serial_out(up, UART_LCR, 0);
 
 	/* drop TCR + TLR access, we setup XON/XOFF later */
-	serial_out(up, UART_MCR, up->mcr);
+	serial8250_out_MCR(up, up->mcr);
 	serial_out(up, UART_IER, up->ier);
 
 	serial_out(up, UART_LCR, UART_LCR_CONF_MODE_B);
@@ -318,8 +318,7 @@ static void omap_8250_set_termios(struct uart_port *port,
 				  struct ktermios *termios,
 				  struct ktermios *old)
 {
-	struct uart_8250_port *up =
-		container_of(port, struct uart_8250_port, port);
+	struct uart_8250_port *up = up_to_u8250p(port);
 	struct omap8250_priv *priv = up->port.private_data;
 	unsigned char cval = 0;
 	unsigned int baud;
@@ -682,9 +681,8 @@ static void omap_8250_shutdown(struct uart_port *port)
 
 static void omap_8250_throttle(struct uart_port *port)
 {
+	struct uart_8250_port *up = up_to_u8250p(port);
 	unsigned long flags;
-	struct uart_8250_port *up =
-		container_of(port, struct uart_8250_port, port);
 
 	pm_runtime_get_sync(port->dev);
 
@@ -697,11 +695,40 @@ static void omap_8250_throttle(struct uart_port *port)
 	pm_runtime_put_autosuspend(port->dev);
 }
 
+static int omap_8250_rs485_config(struct uart_port *port,
+				  struct serial_rs485 *rs485)
+{
+	struct uart_8250_port *up = up_to_u8250p(port);
+
+	/* Clamp the delays to [0, 100ms] */
+	rs485->delay_rts_before_send = min(rs485->delay_rts_before_send, 100U);
+	rs485->delay_rts_after_send  = min(rs485->delay_rts_after_send, 100U);
+
+	port->rs485 = *rs485;
+
+	/*
+	 * Both serial8250_em485_init and serial8250_em485_destroy
+	 * are idempotent
+	 */
+	if (rs485->flags & SER_RS485_ENABLED) {
+		int ret = serial8250_em485_init(up);
+
+		if (ret) {
+			rs485->flags &= ~SER_RS485_ENABLED;
+			port->rs485.flags &= ~SER_RS485_ENABLED;
+		}
+		return ret;
+	}
+
+	serial8250_em485_destroy(up);
+
+	return 0;
+}
+
 static void omap_8250_unthrottle(struct uart_port *port)
 {
+	struct uart_8250_port *up = up_to_u8250p(port);
 	unsigned long flags;
-	struct uart_8250_port *up =
-		container_of(port, struct uart_8250_port, port);
 
 	pm_runtime_get_sync(port->dev);
 
@@ -1146,6 +1173,7 @@ static int omap8250_probe(struct platform_device *pdev)
 	up.port.shutdown = omap_8250_shutdown;
 	up.port.throttle = omap_8250_throttle;
 	up.port.unthrottle = omap_8250_unthrottle;
+	up.port.rs485_config = omap_8250_rs485_config;
 
 	if (pdev->dev.of_node) {
 		const struct of_device_id *id;
@@ -1275,8 +1303,18 @@ static void omap8250_complete(struct device *dev)
 static int omap8250_suspend(struct device *dev)
 {
 	struct omap8250_priv *priv = dev_get_drvdata(dev);
+	struct uart_8250_port *up = serial8250_get_port(priv->line);
 
 	serial8250_suspend_port(priv->line);
+
+	pm_runtime_get_sync(dev);
+	if (device_may_wakeup(dev))
+		serial_out(up, UART_OMAP_WER, priv->wer);
+	else
+		serial_out(up, UART_OMAP_WER, 0);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
+
 	flush_work(&priv->qos_work);
 	return 0;
 }
@@ -1356,6 +1394,8 @@ static int omap8250_runtime_suspend(struct device *dev)
 	}
 
 	if (priv->habit & UART_ERRATA_CLOCK_DISABLE) {
+		/* Save module level wakeup register */
+		u32 wer = serial_in(up, UART_OMAP_WER);
 		int ret;
 
 		ret = omap8250_soft_reset(dev);
@@ -1364,6 +1404,8 @@ static int omap8250_runtime_suspend(struct device *dev)
 
 		/* Restore to UART mode after reset (for wakeup) */
 		omap8250_update_mdr1(up, priv);
+		/* Restore module level wakeup register */
+		serial_out(up, UART_OMAP_WER, wer);
 	}
 
 	if (up->dma && up->dma->rxchan)
@@ -1431,10 +1473,10 @@ static int __init omap8250_console_fixup(void)
 	}
 
 	add_preferred_console("ttyS", idx, options);
-	pr_err("WARNING: Your 'console=ttyO%d' has been replaced by 'ttyS%d'\n",
+	pr_info("WARNING: Your 'console=ttyO%d' has been replaced by 'ttyS%d'\n",
 	       idx, idx);
-	pr_err("This ensures that you still see kernel messages. Please\n");
-	pr_err("update your kernel commandline.\n");
+	pr_info("This ensures that you still see kernel messages. Please\n");
+	pr_info("update your kernel commandline.\n");
 	return 0;
 }
 console_initcall(omap8250_console_fixup);

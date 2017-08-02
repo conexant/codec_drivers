@@ -87,6 +87,24 @@ unsigned int mctrl_gpio_get(struct mctrl_gpios *gpios, unsigned int *mctrl)
 }
 EXPORT_SYMBOL_GPL(mctrl_gpio_get);
 
+unsigned int
+mctrl_gpio_get_outputs(struct mctrl_gpios *gpios, unsigned int *mctrl)
+{
+	enum mctrl_gpio_idx i;
+
+	for (i = 0; i < UART_GPIO_MAX; i++) {
+		if (gpios->gpio[i] && mctrl_gpios_desc[i].dir_out) {
+			if (gpiod_get_value(gpios->gpio[i]))
+				*mctrl |= mctrl_gpios_desc[i].mctrl;
+			else
+				*mctrl &= ~mctrl_gpios_desc[i].mctrl;
+		}
+	}
+
+	return *mctrl;
+}
+EXPORT_SYMBOL_GPL(mctrl_gpio_get_outputs);
+
 struct mctrl_gpios *mctrl_gpio_init_noauto(struct device *dev, unsigned int idx)
 {
 	struct mctrl_gpios *gpios;
@@ -124,6 +142,9 @@ static irqreturn_t mctrl_gpio_irq_handle(int irq, void *context)
 	struct uart_port *port = gpios->port;
 	u32 mctrl = gpios->mctrl_prev;
 	u32 mctrl_diff;
+	unsigned long flags;
+
+	spin_lock_irqsave(&port->lock, flags);
 
 	mctrl_gpio_get(gpios, &mctrl);
 
@@ -145,6 +166,8 @@ static irqreturn_t mctrl_gpio_irq_handle(int irq, void *context)
 
 		wake_up_interruptible(&port->state->port.delta_msr_wait);
 	}
+
+	spin_unlock_irqrestore(&port->lock, flags);
 
 	return IRQ_HANDLED;
 }

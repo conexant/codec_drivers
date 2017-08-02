@@ -15,18 +15,14 @@ Required properties:
 - cpdma_channels 	: Specifies number of channels in CPDMA
 - ale_entries		: Specifies No of entries ALE can hold
 - bd_ram_size		: Specifies internal descriptor RAM size
-- rx_descs		: Specifies number of Rx descriptors
 - mac_control		: Specifies Default MAC control register content
 			  for the specific platform
 - slaves		: Specifies number for slaves
 - active_slave		: Specifies the slave to use for time stamping,
 			  ethtool and SIOCGMIIPHY
-- cpts_clock_mult	: Numerator to convert input clock ticks into nanoseconds
-- cpts_clock_shift	: Denominator to convert input clock ticks into nanoseconds
 
 Optional properties:
 - ti,hwmods		: Must be "cpgmac0"
-- no_bd_ram		: Must be 0 or 1
 - dual_emac		: Specifies Switch to act as Dual EMAC
 - syscon		: Phandle to the system control device node, which is
 			  the control module device of the am33x
@@ -36,7 +32,20 @@ Optional properties:
 			  For example in dra72x-evm, pcf gpio has to be
 			  driven low so that cpsw slave 0 and phy data
 			  lines are connected via mux.
-
+- descs_pool_size	: total number of CPDMA CPPI descriptors to be used for
+			  both ingress/egress packets processing. if not
+			  specified the default value 256 will be used which
+			  will allow to place descriptors pool into the
+			  internal CPPI RAM.
+- cpts_clock_mult	: Numerator to convert input clock ticks into nanoseconds
+- cpts_clock_shift	: Denominator to convert input clock ticks into nanoseconds
+			  Mult and shift will be calculated basing on CPTS
+			  rftclk frequency if both cpts_clock_shift and
+			  cpts_clock_mult properties are not provided.
+- cpts-ext-ts-inputs	: The number of external time stamp channels.
+			  The different CPTS versions might support up 8
+			  external time stamp channels.
+			  if absent - unsupported.
 
 Slave Properties:
 Required properties:

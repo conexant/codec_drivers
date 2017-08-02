@@ -195,6 +195,7 @@ static const struct pwm_ops ecap_pwm_ops = {
 };
 
 static const struct of_device_id ecap_of_match[] = {
+	{ .compatible	= "ti,am3352-ecap" },
 	{ .compatible	= "ti,am33xx-ecap" },
 	{},
 };
@@ -202,6 +203,7 @@ MODULE_DEVICE_TABLE(of, ecap_of_match);
 
 static int ecap_pwm_probe(struct platform_device *pdev)
 {
+	struct device_node *np = pdev->dev.of_node;
 	int ret;
 	struct resource *r;
 	struct clk *clk;
@@ -213,6 +215,13 @@ static int ecap_pwm_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	clk = devm_clk_get(&pdev->dev, "fck");
+	if (IS_ERR(clk)) {
+		if (of_device_is_compatible(np, "ti,am33xx-ecap")) {
+			dev_warn(&pdev->dev, "Binding is obsolete.\n");
+			clk = devm_clk_get(pdev->dev.parent, "fck");
+		}
+	}
+
 	if (IS_ERR(clk)) {
 		dev_err(&pdev->dev, "failed to get clock\n");
 		return PTR_ERR(clk);
@@ -309,6 +318,9 @@ static int ecap_pwm_suspend(struct device *dev)
 	if (pwm_is_enabled(pwm))
 		pm_runtime_put_sync(dev);
 
+	/* Select sleep pin state */
+	pinctrl_pm_select_sleep_state(dev);
+
 	return 0;
 }
 
@@ -316,6 +328,9 @@ static int ecap_pwm_resume(struct device *dev)
 {
 	struct ecap_pwm_chip *pc = dev_get_drvdata(dev);
 	struct pwm_device *pwm = pc->chip.pwms;
+
+	/* Select default pin state */
+	pinctrl_pm_select_default_state(dev);
 
 	/* Enable explicitly if PWM was running */
 	if (pwm_is_enabled(pwm))

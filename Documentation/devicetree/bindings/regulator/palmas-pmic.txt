@@ -1,5 +1,12 @@
 * palmas regulator IP block devicetree bindings
 
+The tps659038 for the AM57x class have OTP spins that
+have different part numbers but the same functionality. There
+is not a need to add the OTP spins to the palmas driver. The
+spin devices should use the tps659038 as it's compatible value.
+This is the list of those devices:
+tps659037
+
 Required properties:
 - compatible : Should be from the list
   ti,twl6035-pmic
@@ -8,6 +15,7 @@ Required properties:
   ti,tps65913-pmic
   ti,tps65914-pmic
   ti,tps65917-pmic
+  ti,tps659038-pmic
 and also the generic series names
   ti,palmas-pmic
 - interrupt-parent : The parent interrupt controller which is palmas.
@@ -17,6 +25,11 @@ and also the generic series names
 
 Optional properties:
 - ti,ldo6-vibrator : ldo6 is in vibrator mode
+- xxx-supply: Input voltage supply regulator.
+	      xxx should match the supply_name populated in the driver.
+	      These entries are required if regulators are enabled for a
+	      device. Missing of these properties can cause the regulator
+	      registration fails.
 
 Optional nodes:
 - regulators : Must contain a sub-node per regulator from the list below.
@@ -59,6 +72,9 @@ pmic {
 	ti,ldo6-vibrator;
 
 	ti,system-power-controller;
+
+	smps1-in-supply = <&vmain>;
+	ldo1-in-supply = <&vmain>;
 
 	regulators {
 		smps12_reg : smps12 {

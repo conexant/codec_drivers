@@ -407,7 +407,7 @@ static inline u32 hw_test_and_write(struct ci_hdrc *ci, enum ci_hw_regs reg,
  */
 static inline bool ci_otg_is_fsm_mode(struct ci_hdrc *ci)
 {
-#ifdef CONFIG_USB_OTG_FSM
+#ifdef CONFIG_USB_OTG
 	struct usb_otg_caps *otg_caps = &ci->platdata->ci_otg_caps;
 
 	return ci->is_otg && ci->roles[CI_ROLE_HOST] &&
@@ -427,9 +427,6 @@ int hw_device_reset(struct ci_hdrc *ci);
 int hw_port_test_set(struct ci_hdrc *ci, u8 mode);
 
 u8 hw_port_test_get(struct ci_hdrc *ci);
-
-int hw_wait_reg(struct ci_hdrc *ci, enum ci_hw_regs reg, u32 mask,
-				u32 value, unsigned int timeout_ms);
 
 void ci_platform_configure(struct ci_hdrc *ci);
 

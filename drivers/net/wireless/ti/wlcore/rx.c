@@ -149,7 +149,6 @@ static int wl1271_rx_handle_data(struct wl1271 *wl, u8 *data, u32 length,
 	if (desc->packet_class == WL12XX_RX_CLASS_LOGGER) {
 		size_t len = length - sizeof(*desc);
 		wl12xx_copy_fwlog(wl, data + sizeof(*desc), len);
-		wake_up_interruptible(&wl->fwlog_waitq);
 		return 0;
 	}
 
@@ -206,6 +205,11 @@ static int wl1271_rx_handle_data(struct wl1271 *wl, u8 *data, u32 length,
 
 	skb_queue_tail(&wl->deferred_rx_queue, skb);
 	queue_work(wl->freezable_wq, &wl->netstack_work);
+
+#ifdef CONFIG_HAS_WAKELOCK
+	/* let the frame some time to propagate to user-space */
+	wake_lock_timeout(&wl->rx_wake, HZ);
+#endif
 
 	return is_data;
 }

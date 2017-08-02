@@ -24,6 +24,8 @@ Optional properties:
 - ti,no-reset-on-init: When present, the module should not be reset at init
 - ti,no-idle-on-init: When present, the module should not be idled at init
 - ti,no-idle: When present, the module is never allowed to idle.
+- ti,deassert-hard-reset: list of hwmod and hardware reset line name pairs
+  (ascii strings) to be deasserted upon device instantiation.
 
 Example:
 
@@ -86,6 +88,9 @@ SoCs:
 - DRA722
   compatible = "ti,dra722", "ti,dra72", "ti,dra7"
 
+- DRA718
+  compatible = "ti,dra718", "ti,dra722", "ti,dra72", "ti,dra7"
+
 - AM5728
   compatible = "ti,am5728", "ti,dra742", "ti,dra74", "ti,dra7"
 
@@ -143,7 +148,7 @@ Boards:
   compatible = "ti,omap5-evm", "ti,omap5"
 
 - AM43x EPOS EVM
-  compatible = "ti,am43x-epos-evm", "ti,am4372", "ti,am43"
+  compatible = "ti,am43x-epos-evm", "ti,am43", "ti,am438x"
 
 - AM437x GP EVM
   compatible = "ti,am437x-gp-evm", "ti,am4372", "ti,am43"
@@ -151,8 +156,20 @@ Boards:
 - AM437x SK EVM: AM437x StarterKit Evaluation Module
   compatible = "ti,am437x-sk-evm", "ti,am4372", "ti,am43"
 
+- AM5728 GPEVM
+  compatible = "ti,am5728-evm", "ti,am5728", "ti,dra742", "ti,dra74", "ti,dra7"
+
+- AM5728 IDK
+  compatible = "ti,am5728-idk", "ti,am5728", "ti,dra742", "ti,dra74", "ti,dra7"
+
+- AM5718 IDK
+  compatible = "ti,am5718-idk", "ti,am5728", "ti,dra742", "ti,dra74", "ti,dra7"
+
 - DRA742 EVM:  Software Development Board for DRA742
   compatible = "ti,dra7-evm", "ti,dra742", "ti,dra74", "ti,dra7"
 
 - DRA722 EVM: Software Development Board for DRA722
   compatible = "ti,dra72-evm", "ti,dra722", "ti,dra72", "ti,dra7"
+
+- DRA718 EVM: Software Development Board for DRA718
+  compatible = "ti,dra718-evm", "ti,dra718", "ti,dra722", "ti,dra72", "ti,dra7"

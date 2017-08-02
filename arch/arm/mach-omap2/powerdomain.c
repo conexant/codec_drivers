@@ -222,7 +222,6 @@ static int _pwrdm_post_transition_cb(struct powerdomain *pwrdm, void *unused)
  * @pwrdm: struct powerdomain * to operate on
  * @curr_pwrst: current power state of @pwrdm
  * @pwrst: power state to switch to
- * @hwsup: ptr to a bool to return whether the clkdm is hardware-supervised
  *
  * Determine whether the powerdomain needs to be turned on before
  * attempting to switch power states.  Called by
@@ -233,8 +232,7 @@ static int _pwrdm_post_transition_cb(struct powerdomain *pwrdm, void *unused)
  * "Types of sleep_switch" comment above).
  */
 static u8 _pwrdm_save_clkdm_state_and_activate(struct powerdomain *pwrdm,
-					       u8 curr_pwrst, u8 pwrst,
-					       bool *hwsup)
+					       u8 curr_pwrst, u8 pwrst)
 {
 	u8 sleep_switch;
 
@@ -244,8 +242,7 @@ static u8 _pwrdm_save_clkdm_state_and_activate(struct powerdomain *pwrdm,
 		    arch_pwrdm->pwrdm_set_lowpwrstchange) {
 			sleep_switch = LOWPOWERSTATE_SWITCH;
 		} else {
-			*hwsup = clkdm_in_hwsup(pwrdm->pwrdm_clkdms[0]);
-			clkdm_wakeup_nolock(pwrdm->pwrdm_clkdms[0]);
+			clkdm_deny_idle_nolock(pwrdm->pwrdm_clkdms[0]);
 			sleep_switch = FORCEWAKEUP_SWITCH;
 		}
 	} else {
@@ -259,7 +256,6 @@ static u8 _pwrdm_save_clkdm_state_and_activate(struct powerdomain *pwrdm,
  * _pwrdm_restore_clkdm_state - restore the clkdm hwsup state after pwrst change
  * @pwrdm: struct powerdomain * to operate on
  * @sleep_switch: return value from _pwrdm_save_clkdm_state_and_activate()
- * @hwsup: should @pwrdm's first clockdomain be set to hardware-supervised mode?
  *
  * Restore the clockdomain state perturbed by
  * _pwrdm_save_clkdm_state_and_activate(), and call the power state
@@ -270,14 +266,11 @@ static u8 _pwrdm_save_clkdm_state_and_activate(struct powerdomain *pwrdm,
  * software-supervised sleep.  No return value.
  */
 static void _pwrdm_restore_clkdm_state(struct powerdomain *pwrdm,
-				       u8 sleep_switch, bool hwsup)
+				       u8 sleep_switch)
 {
 	switch (sleep_switch) {
 	case FORCEWAKEUP_SWITCH:
-		if (hwsup)
-			clkdm_allow_idle_nolock(pwrdm->pwrdm_clkdms[0]);
-		else
-			clkdm_sleep_nolock(pwrdm->pwrdm_clkdms[0]);
+		clkdm_allow_idle_nolock(pwrdm->pwrdm_clkdms[0]);
 		break;
 	case LOWPOWERSTATE_SWITCH:
 		if (pwrdm->flags & PWRDM_HAS_LOWPOWERSTATECHANGE &&
@@ -1092,7 +1085,6 @@ int omap_set_pwrdm_state(struct powerdomain *pwrdm, u8 pwrst)
 	u8 next_pwrst, sleep_switch;
 	int curr_pwrst;
 	int ret = 0;
-	bool hwsup = false;
 
 	if (!pwrdm || IS_ERR(pwrdm))
 		return -EINVAL;
@@ -1116,14 +1108,14 @@ int omap_set_pwrdm_state(struct powerdomain *pwrdm, u8 pwrst)
 		goto osps_out;
 
 	sleep_switch = _pwrdm_save_clkdm_state_and_activate(pwrdm, curr_pwrst,
-							    pwrst, &hwsup);
+							    pwrst);
 
 	ret = pwrdm_set_next_pwrst(pwrdm, pwrst);
 	if (ret)
 		pr_err("%s: unable to set power state of powerdomain: %s\n",
 		       __func__, pwrdm->name);
 
-	_pwrdm_restore_clkdm_state(pwrdm, sleep_switch, hwsup);
+	_pwrdm_restore_clkdm_state(pwrdm, sleep_switch);
 
 osps_out:
 	pwrdm_unlock(pwrdm);
@@ -1167,42 +1159,61 @@ int pwrdm_get_context_loss_count(struct powerdomain *pwrdm)
 }
 
 /**
- * pwrdm_can_ever_lose_context - can this powerdomain ever lose context?
- * @pwrdm: struct powerdomain *
+ * pwrdm_save_context - save powerdomain registers
  *
- * Given a struct powerdomain * @pwrdm, returns 1 if the powerdomain
- * can lose either memory or logic context or if @pwrdm is invalid, or
- * returns 0 otherwise.  This function is not concerned with how the
- * powerdomain registers are programmed (i.e., to go off or not); it's
- * concerned with whether it's ever possible for this powerdomain to
- * go off while some other part of the chip is active.  This function
- * assumes that every powerdomain can go to either ON or INACTIVE.
+ * Register state is going to be lost due to a suspend or hibernate
+ * event. Save the powerdomain registers.
  */
-bool pwrdm_can_ever_lose_context(struct powerdomain *pwrdm)
+static int pwrdm_save_context(struct powerdomain *pwrdm, void *unused)
 {
-	int i;
+	if (arch_pwrdm && arch_pwrdm->pwrdm_save_context)
+		arch_pwrdm->pwrdm_save_context(pwrdm);
+	return 0;
+}
 
-	if (!pwrdm) {
-		pr_debug("powerdomain: %s: invalid powerdomain pointer\n",
-			 __func__);
-		return 1;
+/**
+ * pwrdm_save_context - restore powerdomain registers
+ *
+ * Restore powerdomain control registers after a suspend or resume
+ * event.
+ */
+static int pwrdm_restore_context(struct powerdomain *pwrdm, void *unused)
+{
+	if (arch_pwrdm && arch_pwrdm->pwrdm_restore_context)
+		arch_pwrdm->pwrdm_restore_context(pwrdm);
+	return 0;
+}
+
+static int pwrdm_lost_power(struct powerdomain *pwrdm, void *unused)
+{
+	int state;
+
+	/*
+	 * Power has been lost across all powerdomains, increment the
+	 * counter.
+	 */
+
+	state = pwrdm_read_pwrst(pwrdm);
+	if (state != PWRDM_POWER_OFF) {
+		pwrdm->state_counter[state]++;
+		pwrdm->state_counter[PWRDM_POWER_OFF]++;
 	}
-
-	if (pwrdm->pwrsts & PWRSTS_OFF)
-		return 1;
-
-	if (pwrdm->pwrsts & PWRSTS_RET) {
-		if (pwrdm->pwrsts_logic_ret & PWRSTS_OFF)
-			return 1;
-
-		for (i = 0; i < pwrdm->banks; i++)
-			if (pwrdm->pwrsts_mem_ret[i] & PWRSTS_OFF)
-				return 1;
-	}
-
-	for (i = 0; i < pwrdm->banks; i++)
-		if (pwrdm->pwrsts_mem_on[i] & PWRSTS_OFF)
-			return 1;
+	pwrdm->state = state;
 
 	return 0;
+}
+
+void pwrdms_save_context(void)
+{
+	pwrdm_for_each(pwrdm_save_context, NULL);
+}
+
+void pwrdms_restore_context(void)
+{
+	pwrdm_for_each(pwrdm_restore_context, NULL);
+}
+
+void pwrdms_lost_power(void)
+{
+	pwrdm_for_each(pwrdm_lost_power, NULL);
 }

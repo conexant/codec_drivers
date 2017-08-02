@@ -434,7 +434,13 @@ static void musb_advance_schedule(struct musb *musb, struct urb *urb,
 		}
 	}
 
-	if (qh != NULL && qh->is_ready) {
+	/*
+	 * The pipe must be broken if current urb->status is set, so don't
+	 * start next urb.
+	 * TODO: to minimize the risk of regression, only check urb->status
+	 * for RX, until we have a test case to understand the behavior of TX.
+	 */
+	if ((!status || !is_in) && qh && qh->is_ready) {
 		dev_dbg(musb->controller, "... next ep%d %cX urb %p\n",
 		    hw_ep->epnum, is_in ? 'R' : 'T', next_urb(qh));
 		musb_start_urb(musb, is_in, qh);
@@ -1875,6 +1881,9 @@ void musb_host_rx(struct musb *musb, u8 epnum)
 		status = -EPROTO;
 		musb_writeb(epio, MUSB_RXINTERVAL, 0);
 
+		rx_csr &= ~MUSB_RXCSR_H_ERROR;
+		musb_writew(epio, MUSB_RXCSR, rx_csr);
+
 	} else if (rx_csr & MUSB_RXCSR_DATAERROR) {
 
 		if (USB_ENDPOINT_XFER_ISOC != qh->type) {
@@ -2738,7 +2747,7 @@ static const struct hc_driver musb_hc_driver = {
 	.description		= "musb-hcd",
 	.product_desc		= "MUSB HDRC host driver",
 	.hcd_priv_size		= sizeof(struct musb *),
-	.flags			= HCD_USB2 | HCD_MEMORY | HCD_BH,
+	.flags			= HCD_USB2 | HCD_MEMORY,
 
 	/* not using irq handler or reset hooks from usbcore, since
 	 * those must be shared with peripheral code for OTG configs

@@ -31,12 +31,15 @@
 #include <linux/usb/gadget.h>
 #include <linux/usb/otg.h>
 #include <linux/ulpi/interface.h>
+#include <linux/usb/otg-fsm.h>
 
 #include <linux/phy/phy.h>
+#include <linux/extcon.h>
 
 #define DWC3_MSG_MAX	500
 
 /* Global constants */
+#define DWC3_ZLP_BUF_SIZE	1024	/* size of a superspeed bulk */
 #define DWC3_EP0_BOUNCE_SIZE	512
 #define DWC3_ENDPOINTS_NUM	32
 #define DWC3_XHCI_RESOURCES_NUM	2
@@ -173,6 +176,15 @@
 #define DWC3_GCTL_GBLHIBERNATIONEN	(1 << 1)
 #define DWC3_GCTL_DSBLCLKGTNG		(1 << 0)
 
+/* Global Status Register */
+#define DWC3_GSTS_OTG_IP	(1 << 10)
+#define DWC3_GSTS_BC_IP		(1 << 9)
+#define DWC3_GSTS_ADP_IP	(1 << 8)
+#define DWC3_GSTS_HOST_IP	(1 << 7)
+#define DWC3_GSTS_DEVICE_IP	(1 << 6)
+#define DWC3_GSTS_CSR_TIMEOUT	(1 << 5)
+#define DWC3_GSTS_BUS_ERR_ADDR_VLD	(1 << 4)
+
 /* Global USB2 PHY Configuration Register */
 #define DWC3_GUSB2PHYCFG_PHYSOFTRST	(1 << 31)
 #define DWC3_GUSB2PHYCFG_SUSPHY		(1 << 6)
@@ -235,6 +247,11 @@
 #define DWC3_MAX_HIBER_SCRATCHBUFS		15
 
 /* Global HWPARAMS6 Register */
+#define DWC3_GHWPARAMS6_BCSUPPORT		(1 << 14)
+#define DWC3_GHWPARAMS6_OTG3SUPPORT		(1 << 13)
+#define DWC3_GHWPARAMS6_ADPSUPPORT		(1 << 12)
+#define DWC3_GHWPARAMS6_HNPSUPPORT		(1 << 11)
+#define DWC3_GHWPARAMS6_SRPSUPPORT		(1 << 10)
 #define DWC3_GHWPARAMS6_EN_FPGA			(1 << 7)
 
 /* Global Frame Length Adjustment Register */
@@ -397,6 +414,74 @@
 #define DWC3_DEPCMD_TYPE_ISOC		1
 #define DWC3_DEPCMD_TYPE_BULK		2
 #define DWC3_DEPCMD_TYPE_INTR		3
+
+/* OTG Configuration Register */
+#define DWC3_OCFG_DISPWRCUTTOFF		(1 << 5)
+#define DWC3_OCFG_HIBDISMASK		(1 << 4)
+#define DWC3_OCFG_SFTRSTMASK		(1 << 3)
+#define DWC3_OCFG_OTGVERSION		(1 << 2)
+#define DWC3_OCFG_HNPCAP		(1 << 1)
+#define DWC3_OCFG_SRPCAP		(1 << 0)
+
+/* OTG CTL Register */
+#define DWC3_OCTL_OTG3GOERR		(1 << 7)
+#define DWC3_OCTL_PERIMODE		(1 << 6)
+#define DWC3_OCTL_PRTPWRCTL		(1 << 5)
+#define DWC3_OCTL_HNPREQ		(1 << 4)
+#define DWC3_OCTL_SESREQ		(1 << 3)
+#define DWC3_OCTL_TERMSELIDPULSE	(1 << 2)
+#define DWC3_OCTL_DEVSETHNPEN		(1 << 1)
+#define DWC3_OCTL_HSTSETHNPEN		(1 << 0)
+
+/* OTG Event Register */
+#define DWC3_OEVT_DEVICEMODE		(1 << 31)
+#define DWC3_OEVT_XHCIRUNSTPSET		(1 << 27)
+#define DWC3_OEVT_DEVRUNSTPSET		(1 << 26)
+#define DWC3_OEVT_HIBENTRY		(1 << 25)
+#define DWC3_OEVT_CONIDSTSCHNG		(1 << 24)
+#define DWC3_OEVT_HRRCONFNOTIF		(1 << 23)
+#define DWC3_OEVT_HRRINITNOTIF		(1 << 22)
+#define DWC3_OEVT_ADEVIDLE		(1 << 21)
+#define DWC3_OEVT_ADEVBHOSTEND		(1 << 20)
+#define DWC3_OEVT_ADEVHOST		(1 << 19)
+#define DWC3_OEVT_ADEVHNPCHNG		(1 << 18)
+#define DWC3_OEVT_ADEVSRPDET		(1 << 17)
+#define DWC3_OEVT_ADEVSESSENDDET	(1 << 16)
+#define DWC3_OEVT_BDEVBHOSTEND		(1 << 11)
+#define DWC3_OEVT_BDEVHNPCHNG		(1 << 10)
+#define DWC3_OEVT_BDEVSESSVLDDET	(1 << 9)
+#define DWC3_OEVT_BDEVVBUSCHNG		(1 << 8)
+#define DWC3_OEVT_BSESSVLD		(1 << 3)
+#define DWC3_OEVT_HSTNEGSTS		(1 << 2)
+#define DWC3_OEVT_SESREQSTS		(1 << 1)
+#define DWC3_OEVT_ERROR			(1 << 0)
+
+/* OTG Event Enable Register */
+#define DWC3_OEVTEN_XHCIRUNSTPSETEN	(1 << 27)
+#define DWC3_OEVTEN_DEVRUNSTPSETEN	(1 << 26)
+#define DWC3_OEVTEN_HIBENTRYEN		(1 << 25)
+#define DWC3_OEVTEN_CONIDSTSCHNGEN	(1 << 24)
+#define DWC3_OEVTEN_HRRCONFNOTIFEN	(1 << 23)
+#define DWC3_OEVTEN_HRRINITNOTIFEN	(1 << 22)
+#define DWC3_OEVTEN_ADEVIDLEEN		(1 << 21)
+#define DWC3_OEVTEN_ADEVBHOSTENDEN	(1 << 20)
+#define DWC3_OEVTEN_ADEVHOSTEN		(1 << 19)
+#define DWC3_OEVTEN_ADEVHNPCHNGEN	(1 << 18)
+#define DWC3_OEVTEN_ADEVSRPDETEN	(1 << 17)
+#define DWC3_OEVTEN_ADEVSESSENDDETEN	(1 << 16)
+#define DWC3_OEVTEN_BDEVHOSTENDEN	(1 << 11)
+#define DWC3_OEVTEN_BDEVHNPCHNGEN	(1 << 10)
+#define DWC3_OEVTEN_BDEVSESSVLDDETEN	(1 << 9)
+#define DWC3_OEVTEN_BDEVVBUSCHNGE	(1 << 8)
+
+/* OTG Status Register */
+#define DWC3_OSTS_DEVRUNSTP		(1 << 13)
+#define DWC3_OSTS_XHCIRUNSTP		(1 << 12)
+#define DWC3_OSTS_PERIPHERALSTATE	(1 << 4)
+#define DWC3_OSTS_XHCIPRTPOWER		(1 << 3)
+#define DWC3_OSTS_BSESVLD		(1 << 2)
+#define DWC3_OSTS_VBUSVLD		(1 << 1)
+#define DWC3_OSTS_CONIDSTS		(1 << 0)
 
 /* Structures */
 
@@ -645,6 +730,7 @@ struct dwc3_scratchpad_array {
  * @ctrl_req: usb control request which is used for ep0
  * @ep0_trb: trb which is used for the ctrl_req
  * @ep0_bounce: bounce buffer for ep0
+ * @zlp_buf: used when request->zero is set
  * @setup_buf: used while precessing STD USB requests
  * @ctrl_req_addr: dma address of ctrl_req
  * @ep0_trb: dma address of ep0_trb
@@ -665,6 +751,17 @@ struct dwc3_scratchpad_array {
  * @maximum_speed: maximum speed requested (mainly for testing purposes)
  * @revision: revision register contents
  * @dr_mode: requested mode of operation
+ * @fsm: otg state machine
+ * @otg_config: otg controller configuration
+ * @otg_prevent_sync: flag to block events to otg fsm
+ * @otg_protocol: saved copy of otg state during suspend
+ * @current_mode: current mode of operation written to PRTCAPDIR
+ * @oevt: cached OEVT register during OTG irq
+ * @edev: extcon dev for USB cable events ID & VBUS
+ * @otg_nb: notifier for USB cable events
+ * @xhci_irq: IRQ number for XHCI IRQs
+ * @gadget_irq: IRQ number for Peripheral IRQs
+ * @otg_irq: IRQ number for OTG IRQs
  * @usb2_phy: pointer to USB2 PHY
  * @usb3_phy: pointer to USB3 PHY
  * @usb2_generic_phy: pointer to USB2 PHY
@@ -672,6 +769,8 @@ struct dwc3_scratchpad_array {
  * @ulpi: pointer to ulpi interface
  * @dcfg: saved contents of DCFG register
  * @gctl: saved contents of GCTL register
+ * @ocfg: saved contents of OCFG register
+ * @octl: saved contents of OCTL register
  * @isoch_delay: wValue from Set Isochronous Delay request;
  * @u2sel: parameter from Set SEL request.
  * @u2pel: parameter from Set SEL request.
@@ -704,6 +803,7 @@ struct dwc3_scratchpad_array {
  * @is_fpga: true when we are using the FPGA board
  * @needs_fifo_resize: not all users might want fifo resizing, flag it
  * @pullups_connected: true when Run/Stop bit is set
+ * @start_on_resume: true to start device controller on resume
  * @resize_fifos: tells us it's ok to reconfigure our TxFIFO sizes.
  * @setup_packet_pending: true when there's a Setup Packet in FIFO. Workaround
  * @start_config_issued: true when StartConfig command has been issued
@@ -732,6 +832,7 @@ struct dwc3 {
 	struct usb_ctrlrequest	*ctrl_req;
 	struct dwc3_trb		*ep0_trb;
 	void			*ep0_bounce;
+	void			*zlp_buf;
 	void			*scratchbuf;
 	u8			*setup_buf;
 	dma_addr_t		ctrl_req_addr;
@@ -753,6 +854,7 @@ struct dwc3 {
 
 	struct usb_gadget	gadget;
 	struct usb_gadget_driver *gadget_driver;
+	bool			reset_event; /* used for run/stop workaround */
 
 	struct usb_phy		*usb2_phy;
 	struct usb_phy		*usb3_phy;
@@ -766,10 +868,24 @@ struct dwc3 {
 	size_t			regs_size;
 
 	enum usb_dr_mode	dr_mode;
+	struct otg_fsm		*fsm;
+	struct usb_otg_config	otg_config;
+	bool			otg_prevent_sync;
+	int			otg_protocol;
+	u32			current_mode;
+	u32			oevt;
+	struct extcon_dev	*edev;
+	struct notifier_block	otg_nb;
+
+	int			gadget_irq;
+	int			xhci_irq;
+	int			otg_irq;
 
 	/* used for suspend/resume */
 	u32			dcfg;
 	u32			gctl;
+	u32			ocfg;
+	u32			octl;
 
 	u32			nr_scratch;
 	u32			num_event_buffers;
@@ -804,6 +920,8 @@ struct dwc3 {
 #define DWC3_REVISION_260A	0x5533260a
 #define DWC3_REVISION_270A	0x5533270a
 #define DWC3_REVISION_280A	0x5533280a
+#define DWC3_REVISION_290A	0x5533290a
+#define DWC3_REVISION_300A	0x5533300a
 
 /*
  * NOTICE: we're using bit 31 as a "is usb 3.1" flag. This is really
@@ -849,6 +967,7 @@ struct dwc3 {
 	unsigned		is_fpga:1;
 	unsigned		needs_fifo_resize:1;
 	unsigned		pullups_connected:1;
+	unsigned		start_on_resume:1;
 	unsigned		resize_fifos:1;
 	unsigned		setup_packet_pending:1;
 	unsigned		three_stage_setup:1;
@@ -1018,6 +1137,7 @@ struct dwc3_gadget_ep_cmd_params {
 /* prototypes */
 void dwc3_set_mode(struct dwc3 *dwc, u32 mode);
 int dwc3_gadget_resize_tx_fifos(struct dwc3 *dwc);
+int dwc3_device_reinit(struct dwc3 *dwc);
 
 #if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
 int dwc3_host_init(struct dwc3 *dwc);

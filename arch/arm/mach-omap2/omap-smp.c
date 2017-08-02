@@ -43,12 +43,45 @@
 /* SCU base address */
 static void __iomem *scu_base;
 
-static DEFINE_SPINLOCK(boot_lock);
+static DEFINE_RAW_SPINLOCK(boot_lock);
 
 void __iomem *omap4_get_scu_base(void)
 {
 	return scu_base;
 }
+
+#ifdef CONFIG_OMAP5_ERRATA_801819
+void omap5_erratum_workaround_801819(void)
+{
+	u32 acr, revidr;
+	u32 acr_mask;
+
+	/* REVIDR[3] indicates erratum fix available on silicon */
+	asm volatile ("mrc p15, 0, %0, c0, c0, 6" : "=r" (revidr));
+	if (revidr & (0x1 << 3))
+		return;
+
+	asm volatile ("mrc p15, 0, %0, c1, c0, 1" : "=r" (acr));
+	/*
+	 * BIT(27) - Disables streaming. All write-allocate lines allocate in
+	 * the L1 or L2 cache.
+	 * BIT(25) - Disables streaming. All write-allocate lines allocate in
+	 * the L1 cache.
+	 */
+	acr_mask = (0x3 << 25) | (0x3 << 27);
+	/* do we already have it done.. if yes, skip expensive smc */
+	if ((acr & acr_mask) == acr_mask)
+		return;
+
+	acr |= acr_mask;
+	omap_smc1(OMAP5_DRA7_MON_SET_ACR_INDEX, acr);
+
+	pr_debug("%s: ARM erratum workaround 801819 applied on CPU%d\n",
+		 __func__, smp_processor_id());
+}
+#else
+static inline void omap5_erratum_workaround_801819(void) { }
+#endif
 
 static void omap4_secondary_init(unsigned int cpu)
 {
@@ -64,18 +97,21 @@ static void omap4_secondary_init(unsigned int cpu)
 		omap_secure_dispatcher(OMAP4_PPA_CPU_ACTRL_SMP_INDEX,
 							4, 0, 0, 0, 0, 0);
 
-	/*
-	 * Configure the CNTFRQ register for the secondary cpu's which
-	 * indicates the frequency of the cpu local timers.
-	 */
-	if (soc_is_omap54xx() || soc_is_dra7xx())
+	if (soc_is_omap54xx() || soc_is_dra7xx()) {
+		/*
+		 * Configure the CNTFRQ register for the secondary cpu's which
+		 * indicates the frequency of the cpu local timers.
+		 */
 		set_cntfreq();
+		/* Configure ACR to disable streaming WA for 801819 */
+		omap5_erratum_workaround_801819();
+	}
 
 	/*
 	 * Synchronise with the boot thread.
 	 */
-	spin_lock(&boot_lock);
-	spin_unlock(&boot_lock);
+	raw_spin_lock(&boot_lock);
+	raw_spin_unlock(&boot_lock);
 }
 
 static int omap4_boot_secondary(unsigned int cpu, struct task_struct *idle)
@@ -89,7 +125,7 @@ static int omap4_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 * Set synchronisation state between this boot processor
 	 * and the secondary one
 	 */
-	spin_lock(&boot_lock);
+	raw_spin_lock(&boot_lock);
 
 	/*
 	 * Update the AuxCoreBoot0 with boot state for secondary core.
@@ -143,7 +179,7 @@ static int omap4_boot_secondary(unsigned int cpu, struct task_struct *idle)
 		 * Ensure that CPU power state is set to ON to avoid CPU
 		 * powerdomain transition on wfi
 		 */
-		clkdm_wakeup_nolock(cpu1_clkdm);
+		clkdm_deny_idle_nolock(cpu1_clkdm);
 		pwrdm_set_next_pwrst(cpu1_pwrdm, PWRDM_POWER_ON);
 		clkdm_allow_idle_nolock(cpu1_clkdm);
 
@@ -166,7 +202,7 @@ static int omap4_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 * Now the secondary core is starting up let it run its
 	 * calibrations, then wait for it to finish
 	 */
-	spin_unlock(&boot_lock);
+	raw_spin_unlock(&boot_lock);
 
 	return 0;
 }
@@ -218,6 +254,8 @@ static void __init omap4_smp_prepare_cpus(unsigned int max_cpus)
 
 	if (cpu_is_omap446x())
 		startup_addr = omap4460_secondary_startup;
+	if (soc_is_dra74x() || soc_is_omap54xx())
+		omap5_erratum_workaround_801819();
 
 	/*
 	 * Write the address of secondary startup routine into the

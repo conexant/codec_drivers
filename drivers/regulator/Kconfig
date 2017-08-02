@@ -295,6 +295,15 @@ config REGULATOR_LP872X
 	help
 	  This driver supports LP8720/LP8725 PMIC
 
+config REGULATOR_LP873X
+	tristate "TI LP873X Power regulators"
+	depends on MFD_TI_LP873X && OF
+	help
+	  This driver supports LP873X voltage regulator chips. LP873X
+	  provides two step-down converters and two general-purpose LDO
+	  voltage regulators. It supports software based voltage control
+	  for different voltage domains
+
 config REGULATOR_LP8755
 	tristate "TI LP8755 High Performance PMU driver"
 	depends on I2C
@@ -681,6 +690,13 @@ config REGULATOR_TPS6507X
 	  three step-down converters and two general-purpose LDO voltage regulators.
 	  It supports TI's software based Class-2 SmartReflex implementation.
 
+config REGULATOR_TPS65086
+	tristate "TI TPS65086 Power regulators"
+	depends on MFD_TPS65086
+	help
+	  This driver provides support for the voltage regulators on
+	  TI TPS65086 PMICs.
+
 config REGULATOR_TPS65090
 	tristate "TI TPS65090 Power regulator"
 	depends on MFD_TPS65090
@@ -730,7 +746,7 @@ config REGULATOR_TPS65910
 
 config REGULATOR_TPS65912
 	tristate "TI TPS65912 Power regulator"
-	depends on (MFD_TPS65912_I2C || MFD_TPS65912_SPI)
+	depends on MFD_TPS65912
 	help
 	    This driver supports TPS65912 voltage regulator chip.
 

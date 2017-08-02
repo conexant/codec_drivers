@@ -85,9 +85,9 @@
 						(n << 2))
 
 /* Transmit Buffer for Serializer n */
-#define DAVINCI_MCASP_TXBUF_REG		0x200
+#define DAVINCI_MCASP_TXBUF_REG(n)	(0x200 + (n << 2))
 /* Receive Buffer for Serializer n */
-#define DAVINCI_MCASP_RXBUF_REG		0x280
+#define DAVINCI_MCASP_RXBUF_REG(n)	(0x280 + (n << 2))
 
 /* McASP FIFO Registers */
 #define DAVINCI_MCASP_V2_AFIFO_BASE	(0x1010)
@@ -98,6 +98,13 @@
 #define MCASP_WFIFOSTS_OFFSET		(0x4)
 #define MCASP_RFIFOCTL_OFFSET		(0x8)
 #define MCASP_RFIFOSTS_OFFSET		(0xc)
+
+/* DAVINCI_MCASP_PID_REG - Peripheral Identification Register Bits */
+#define MCASP_V4_REVMINOR_MASK		(0x3f)
+#define MCASP_V4_REVMAJOR_MASK		(0x7 << 8)
+#define MCASP_V4_REV_MASK		(MCASP_V4_REVMAJOR_MASK | \
+					 MCASP_V4_REVMINOR_MASK)
+#define MCASP_V4_REV(maj, min)		((maj) << 8 | (min))
 
 /*
  * DAVINCI_MCASP_PWREMUMGT_REG - Power Down and Emulation Management

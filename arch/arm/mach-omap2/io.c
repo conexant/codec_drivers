@@ -654,6 +654,7 @@ void __init am33xx_init_early(void)
 void __init am33xx_init_late(void)
 {
 	omap_common_late_init();
+	amx3_common_pm_init();
 }
 #endif
 
@@ -678,6 +679,7 @@ void __init am43xx_init_late(void)
 {
 	omap_common_late_init();
 	omap2_clk_enable_autoidle_all();
+	amx3_common_pm_init();
 }
 #endif
 
@@ -738,7 +740,8 @@ void __init omap5_init_late(void)
 #ifdef CONFIG_SOC_DRA7XX
 void __init dra7xx_init_early(void)
 {
-	omap2_set_globals_tap(-1, OMAP2_L4_IO_ADDRESS(DRA7XX_TAP_BASE));
+	omap2_set_globals_tap(DRA7XX_CLASS,
+			      OMAP2_L4_IO_ADDRESS(DRA7XX_TAP_BASE));
 	omap2_set_globals_prcm_mpu(OMAP2_L4_IO_ADDRESS(OMAP54XX_PRCM_MPU_BASE));
 	omap2_control_base_init();
 	omap4_pm_init_early();

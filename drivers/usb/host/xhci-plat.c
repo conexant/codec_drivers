@@ -162,6 +162,12 @@ static int xhci_plat_probe(struct platform_device *pdev)
 			(pdata && pdata->usb3_lpm_capable))
 		xhci->quirks |= XHCI_LPM_SUPPORT;
 
+	if (pdata && pdata->quirk_port_broken_pe)
+		xhci->quirks |= XHCI_BROKEN_PORT_PE;
+
+	if (HCC_MAX_PSA(xhci->hcc_params) >= 4)
+		xhci->shared_hcd->can_do_streams = 1;
+
 	hcd->usb_phy = devm_usb_get_phy_by_phandle(&pdev->dev, "usb-phy", 0);
 	if (IS_ERR(hcd->usb_phy)) {
 		ret = PTR_ERR(hcd->usb_phy);

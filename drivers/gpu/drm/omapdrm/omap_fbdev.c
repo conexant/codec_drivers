@@ -22,6 +22,8 @@
 
 #include "omap_drv.h"
 
+#include <linux/suspend.h>
+
 MODULE_PARM_DESC(ywrap, "Enable ywrap scrolling (omap44xx and later, default 'y')");
 static bool ywrap_enabled = true;
 module_param_named(ywrap, ywrap_enabled, bool, 0644);
@@ -125,9 +127,8 @@ static int omap_fbdev_create(struct drm_fb_helper *helper,
 	mode_cmd.width = sizes->surface_width;
 	mode_cmd.height = sizes->surface_height;
 
-	mode_cmd.pitches[0] = align_pitch(
-			mode_cmd.width * ((sizes->surface_bpp + 7) / 8),
-			mode_cmd.width, sizes->surface_bpp);
+	mode_cmd.pitches[0] =
+			DIV_ROUND_UP(mode_cmd.width * sizes->surface_bpp, 8);
 
 	fbdev->ywrap_enabled = priv->has_dmm && ywrap_enabled;
 	if (fbdev->ywrap_enabled) {
@@ -259,6 +260,9 @@ struct drm_fb_helper *omap_fbdev_init(struct drm_device *dev)
 	struct drm_fb_helper *helper;
 	int ret = 0;
 
+	if (!priv->num_crtcs || !priv->num_connectors)
+		return NULL;
+
 	fbdev = kzalloc(sizeof(*fbdev), GFP_KERNEL);
 	if (!fbdev)
 		goto fail;
@@ -280,14 +284,19 @@ struct drm_fb_helper *omap_fbdev_init(struct drm_device *dev)
 	if (ret)
 		goto fini;
 
-	/* disable all the possible outputs/crtcs before entering KMS mode */
-	drm_helper_disable_unused_functions(dev);
-
 	ret = drm_fb_helper_initial_config(helper, 32);
 	if (ret)
 		goto fini;
 
 	priv->fbdev = helper;
+
+	/*
+	 * disable creation of new console during suspend.
+	 * this works around a problem where a ctrl-c is needed
+	 * to be entered on the VT to actually get the device
+	 * to continue into the suspend state.
+	 */
+	pm_set_vt_switch(0);
 
 	return helper;
 
@@ -295,6 +304,10 @@ fini:
 	drm_fb_helper_fini(helper);
 fail:
 	kfree(fbdev);
+
+	dev_warn(dev->dev, "omap_fbdev_init failed\n");
+	/* well, limp along without an fbdev.. maybe X11 will work? */
+
 	return NULL;
 }
 

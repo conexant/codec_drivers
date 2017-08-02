@@ -122,8 +122,8 @@ static int omap_device_build_from_dt(struct platform_device *pdev)
 	struct omap_device *od;
 	struct omap_hwmod *oh;
 	struct device_node *node = pdev->dev.of_node;
-	const char *oh_name;
-	int oh_cnt, i, ret = 0;
+	const char *oh_name, *rst_name;
+	int oh_cnt, dstr_cnt, i, ret = 0;
 	bool device_active = false;
 
 	oh_cnt = of_property_count_strings(node, "ti,hwmods");
@@ -174,6 +174,26 @@ static int omap_device_build_from_dt(struct platform_device *pdev)
 		omap_device_enable(pdev);
 		pm_runtime_set_active(&pdev->dev);
 	}
+	dstr_cnt =
+		of_property_count_strings(node, "ti,deassert-hard-reset");
+	if (dstr_cnt > 0) {
+		for (i = 0; i < dstr_cnt; i += 2) {
+			of_property_read_string_index(
+				node, "ti,deassert-hard-reset", i,
+				&oh_name);
+			of_property_read_string_index(
+				node, "ti,deassert-hard-reset", i+1,
+				&rst_name);
+			oh = omap_hwmod_lookup(oh_name);
+			if (!oh) {
+				dev_warn(&pdev->dev,
+				"Cannot parse deassert property for '%s'\n",
+				oh_name);
+				break;
+			}
+			omap_hwmod_deassert_hardreset(oh, rst_name);
+		}
+	}
 
 odbfd_exit1:
 	kfree(hwmods);
@@ -185,16 +205,63 @@ odbfd_exit:
 	return ret;
 }
 
+/**
+ * _omap_device_check_reidle_hwmods - check all hwmods in device for reidle flag
+ * @od: struct omap_device *od
+ *
+ * Checks underlying hwmods for reidle flag, if present, remove from hwmod
+ * list and set flag in omap_device to keep track.  Returns 0.
+ */
+static int _omap_device_check_reidle_hwmods(struct omap_device *od)
+{
+	int i;
+
+	for (i = 0; i < od->hwmods_cnt; i++) {
+		if (od->hwmods[i]->flags & HWMOD_NEEDS_REIDLE) {
+			od->flags |= OMAP_DEVICE_HAS_REIDLE_HWMODS;
+			omap_hwmod_disable_reidle(od->hwmods[i]);
+		}
+	}
+
+	return 0;
+}
+
 static int _omap_device_notifier_call(struct notifier_block *nb,
 				      unsigned long event, void *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct omap_device *od;
+	int i, err;
 
 	switch (event) {
 	case BUS_NOTIFY_DEL_DEVICE:
-		if (pdev->archdata.od)
-			omap_device_delete(pdev->archdata.od);
+		od = to_omap_device(pdev);
+		if (!od)
+			break;
+
+		for (i = 0; i < od->hwmods_cnt; i++) {
+			/* shutdown hwmods */
+			omap_hwmod_shutdown(od->hwmods[i]);
+			/* we don't remove clocks cause there's no API to do so */
+			/* no harm done, since they will not be created next time */
+		}
+		omap_device_delete(od);
+		break;
+	case BUS_NOTIFY_UNBOUND_DRIVER:
+		od = to_omap_device(pdev);
+		if (od && (od->_state == OMAP_DEVICE_STATE_ENABLED)) {
+			dev_info(dev, "enabled after unload, idling\n");
+			err = omap_device_idle(pdev);
+			if (err)
+				dev_err(dev, "failed to idle\n");
+		}
+		break;
+	case BUS_NOTIFY_BOUND_DRIVER:
+		od = to_omap_device(pdev);
+		if (od) {
+			od->_driver_status = BUS_NOTIFY_BOUND_DRIVER;
+			_omap_device_check_reidle_hwmods(od);
+		}
 		break;
 	case BUS_NOTIFY_ADD_DEVICE:
 		if (pdev->dev.of_node)
@@ -242,6 +309,24 @@ static int _omap_device_idle_hwmods(struct omap_device *od)
 		ret |= omap_hwmod_idle(od->hwmods[i]);
 
 	return ret;
+}
+
+/**
+ * _omap_device_reidle_hwmods - call omap_hwmod_enable_reidle on all hwmods
+ * @od: struct omap_device *od
+ *
+ * Add all underlying hwmods to hwmod reidle list.  Returns 0.
+ */
+static int _omap_device_reidle_hwmods(struct omap_device *od)
+{
+	int i;
+
+	for (i = 0; i < od->hwmods_cnt; i++)
+		if (od->hwmods[i]->flags | HWMOD_NEEDS_REIDLE)
+			omap_hwmod_enable_reidle(od->hwmods[i]);
+
+	/* XXX pass along return value here? */
+	return 0;
 }
 
 /* Public functions for use by core code */
@@ -481,6 +566,9 @@ void omap_device_delete(struct omap_device *od)
 {
 	if (!od)
 		return;
+
+	if (od->flags & OMAP_DEVICE_HAS_REIDLE_HWMODS)
+		_omap_device_reidle_hwmods(od);
 
 	od->pdev->archdata.od = NULL;
 	kfree(od->hwmods);
@@ -757,6 +845,8 @@ int omap_device_idle(struct platform_device *pdev)
 	struct omap_device *od;
 
 	od = to_omap_device(pdev);
+	if (!od)
+		return 0;
 
 	if (od->_state != OMAP_DEVICE_STATE_ENABLED) {
 		dev_warn(&pdev->dev,
@@ -866,6 +956,7 @@ static struct notifier_block platform_nb = {
 
 static int __init omap_device_init(void)
 {
+	omap_hwmod_setup_reidle();
 	bus_register_notifier(&platform_bus_type, &platform_nb);
 	return 0;
 }

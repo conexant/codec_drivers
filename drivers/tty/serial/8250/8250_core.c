@@ -58,7 +58,16 @@ static struct uart_driver serial8250_reg;
 
 static unsigned int skip_txen_test; /* force skip of txen test at init time */
 
-#define PASS_LIMIT	512
+/*
+ * On -rt we can have a more delays, and legitimately
+ * so - so don't drop work spuriously and spam the
+ * syslog:
+ */
+#ifdef CONFIG_PREEMPT_RT_FULL
+# define PASS_LIMIT	1000000
+#else
+# define PASS_LIMIT	512
+#endif
 
 #include <asm/serial.h>
 /*
@@ -597,6 +606,7 @@ static void univ8250_console_write(struct console *co, const char *s,
 static int univ8250_console_setup(struct console *co, char *options)
 {
 	struct uart_port *port;
+	int retval;
 
 	/*
 	 * Check whether an invalid uart number has been specified, and
@@ -609,7 +619,10 @@ static int univ8250_console_setup(struct console *co, char *options)
 	/* link port to console */
 	port->cons = co;
 
-	return serial8250_console_setup(port, options, false);
+	retval = serial8250_console_setup(port, options, false);
+	if (retval != 0)
+		port->cons = NULL;
+	return retval;
 }
 
 /**
@@ -620,7 +633,7 @@ static int univ8250_console_setup(struct console *co, char *options)
  *	@options: ptr to option string from console command line
  *
  *	Only attempts to match console command lines of the form:
- *	    console=uart[8250],io|mmio|mmio32,<addr>[,<options>]
+ *	    console=uart[8250],io|mmio|mmio16|mmio32,<addr>[,<options>]
  *	    console=uart[8250],0x<addr>[,<options>]
  *	This form is used to register an initial earlycon boot console and
  *	replace it with the serial8250_console at 8250 driver init.
@@ -650,8 +663,9 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
 
 		if (port->iotype != iotype)
 			continue;
-		if ((iotype == UPIO_MEM || iotype == UPIO_MEM32) &&
-		    (port->mapbase != addr))
+		if ((iotype == UPIO_MEM || iotype == UPIO_MEM16 ||
+		     iotype == UPIO_MEM32 || iotype == UPIO_MEM32BE)
+		    && (port->mapbase != addr))
 			continue;
 		if (iotype == UPIO_PORT && port->iobase != addr)
 			continue;
@@ -686,7 +700,7 @@ static int __init univ8250_console_init(void)
 }
 console_initcall(univ8250_console_init);
 
-#define SERIAL8250_CONSOLE	&univ8250_console
+#define SERIAL8250_CONSOLE	(&univ8250_console)
 #else
 #define SERIAL8250_CONSOLE	NULL
 #endif
@@ -763,6 +777,7 @@ void serial8250_suspend_port(int line)
 
 	uart_suspend_port(&serial8250_reg, port);
 }
+EXPORT_SYMBOL(serial8250_suspend_port);
 
 /**
  *	serial8250_resume_port - resume one serial port
@@ -788,6 +803,7 @@ void serial8250_resume_port(int line)
 	}
 	uart_resume_port(&serial8250_reg, port);
 }
+EXPORT_SYMBOL(serial8250_resume_port);
 
 /*
  * Register a set of serial devices attached to a platform device.  The
@@ -1067,6 +1083,15 @@ void serial8250_unregister_port(int line)
 	struct uart_8250_port *uart = &serial8250_ports[line];
 
 	mutex_lock(&serial_mutex);
+
+	if (uart->em485) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&uart->port.lock, flags);
+		serial8250_em485_destroy(uart);
+		spin_unlock_irqrestore(&uart->port.lock, flags);
+	}
+
 	uart_remove_one_port(&serial8250_reg, &uart->port);
 	if (serial8250_isa_devs) {
 		uart->port.flags &= ~UPF_BOOT_AUTOCONF;
@@ -1092,9 +1117,8 @@ static int __init serial8250_init(void)
 
 	serial8250_isa_init_ports();
 
-	printk(KERN_INFO "Serial: 8250/16550 driver, "
-		"%d ports, IRQ sharing %sabled\n", nr_uarts,
-		share_irqs ? "en" : "dis");
+	pr_info("Serial: 8250/16550 driver, %d ports, IRQ sharing %sabled\n",
+		nr_uarts, share_irqs ? "en" : "dis");
 
 #ifdef CONFIG_SPARC
 	ret = sunserial_register_minors(&serial8250_reg, UART_NR);
@@ -1167,15 +1191,11 @@ static void __exit serial8250_exit(void)
 module_init(serial8250_init);
 module_exit(serial8250_exit);
 
-EXPORT_SYMBOL(serial8250_suspend_port);
-EXPORT_SYMBOL(serial8250_resume_port);
-
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Generic 8250/16x50 serial driver");
 
 module_param(share_irqs, uint, 0644);
-MODULE_PARM_DESC(share_irqs, "Share IRQs with other non-8250/16x50 devices"
-	" (unsafe)");
+MODULE_PARM_DESC(share_irqs, "Share IRQs with other non-8250/16x50 devices (unsafe)");
 
 module_param(nr_uarts, uint, 0644);
 MODULE_PARM_DESC(nr_uarts, "Maximum number of UARTs supported. (1-" __MODULE_STRING(CONFIG_SERIAL_8250_NR_UARTS) ")");

@@ -15,7 +15,6 @@
  */
 
 #include <linux/types.h>
-#include <linux/atomic.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/printk.h>
@@ -124,7 +123,6 @@ struct rte_console {
 
 #define BRCMF_FIRSTREAD	(1 << 6)
 
-#define BRCMF_CONSOLE	10	/* watchdog interval to poll console */
 
 /* SBSDIO_DEVICE_CTL */
 
@@ -603,8 +601,6 @@ static const struct sdiod_drive_str sdiod_drvstr_tab2_3v3[] = {
 #define BCM43241B0_NVRAM_NAME		"brcm/brcmfmac43241b0-sdio.txt"
 #define BCM43241B4_FIRMWARE_NAME	"brcm/brcmfmac43241b4-sdio.bin"
 #define BCM43241B4_NVRAM_NAME		"brcm/brcmfmac43241b4-sdio.txt"
-#define BCM43241B5_FIRMWARE_NAME	"brcm/brcmfmac43241b5-sdio.bin"
-#define BCM43241B5_NVRAM_NAME		"brcm/brcmfmac43241b5-sdio.txt"
 #define BCM4329_FIRMWARE_NAME		"brcm/brcmfmac4329-sdio.bin"
 #define BCM4329_NVRAM_NAME		"brcm/brcmfmac4329-sdio.txt"
 #define BCM4330_FIRMWARE_NAME		"brcm/brcmfmac4330-sdio.bin"
@@ -613,6 +609,8 @@ static const struct sdiod_drive_str sdiod_drvstr_tab2_3v3[] = {
 #define BCM4334_NVRAM_NAME		"brcm/brcmfmac4334-sdio.txt"
 #define BCM43340_FIRMWARE_NAME		"brcm/brcmfmac43340-sdio.bin"
 #define BCM43340_NVRAM_NAME		"brcm/brcmfmac43340-sdio.txt"
+#define BCM43341_FIRMWARE_NAME		"brcm/brcmfmac43341-sdio.bin"
+#define BCM43341_NVRAM_NAME		"brcm/brcmfmac43341-sdio.txt"
 #define BCM4335_FIRMWARE_NAME		"brcm/brcmfmac4335-sdio.bin"
 #define BCM4335_NVRAM_NAME		"brcm/brcmfmac4335-sdio.txt"
 #define BCM43362_FIRMWARE_NAME		"brcm/brcmfmac43362-sdio.bin"
@@ -632,8 +630,6 @@ MODULE_FIRMWARE(BCM43241B0_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM43241B0_NVRAM_NAME);
 MODULE_FIRMWARE(BCM43241B4_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM43241B4_NVRAM_NAME);
-MODULE_FIRMWARE(BCM43241B5_FIRMWARE_NAME);
-MODULE_FIRMWARE(BCM43241B5_NVRAM_NAME);
 MODULE_FIRMWARE(BCM4329_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM4329_NVRAM_NAME);
 MODULE_FIRMWARE(BCM4330_FIRMWARE_NAME);
@@ -642,6 +638,8 @@ MODULE_FIRMWARE(BCM4334_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM4334_NVRAM_NAME);
 MODULE_FIRMWARE(BCM43340_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM43340_NVRAM_NAME);
+MODULE_FIRMWARE(BCM43341_FIRMWARE_NAME);
+MODULE_FIRMWARE(BCM43341_NVRAM_NAME);
 MODULE_FIRMWARE(BCM4335_FIRMWARE_NAME);
 MODULE_FIRMWARE(BCM4335_NVRAM_NAME);
 MODULE_FIRMWARE(BCM43362_FIRMWARE_NAME);
@@ -673,12 +671,12 @@ enum brcmf_firmware_type {
 static const struct brcmf_firmware_names brcmf_fwname_data[] = {
 	{ BRCM_CC_43143_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM43143) },
 	{ BRCM_CC_43241_CHIP_ID, 0x0000001F, BRCMF_FIRMWARE_NVRAM(BCM43241B0) },
-	{ BRCM_CC_43241_CHIP_ID, 0x00000020, BRCMF_FIRMWARE_NVRAM(BCM43241B4) },
-	{ BRCM_CC_43241_CHIP_ID, 0xFFFFFFC0, BRCMF_FIRMWARE_NVRAM(BCM43241B5) },
+	{ BRCM_CC_43241_CHIP_ID, 0xFFFFFFE0, BRCMF_FIRMWARE_NVRAM(BCM43241B4) },
 	{ BRCM_CC_4329_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4329) },
 	{ BRCM_CC_4330_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4330) },
 	{ BRCM_CC_4334_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4334) },
 	{ BRCM_CC_43340_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM43340) },
+	{ BRCM_CC_43341_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM43341) },
 	{ BRCM_CC_4335_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4335) },
 	{ BRCM_CC_43362_CHIP_ID, 0xFFFFFFFE, BRCMF_FIRMWARE_NVRAM(BCM43362) },
 	{ BRCM_CC_4339_CHIP_ID, 0xFFFFFFFF, BRCMF_FIRMWARE_NVRAM(BCM4339) },
@@ -1580,10 +1578,12 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 				pnext = NULL;
 				break;
 			}
+/*
 			if (sublen % bus->sgentry_align) {
 				brcmf_err("sublen %d not multiple of %d\n",
 					  sublen, bus->sgentry_align);
 			}
+*/
 			totlen += sublen;
 
 			/* For last frame, adjust read len so total
@@ -2566,6 +2566,15 @@ static inline void brcmf_sdio_clrintr(struct brcmf_sdio *bus)
 	}
 }
 
+static void atomic_orr(int val, atomic_t *v)
+{
+	int old_val;
+
+	old_val = atomic_read(v);
+	while (atomic_cmpxchg(v, old_val, val | old_val) != old_val)
+		old_val = atomic_read(v);
+}
+
 static int brcmf_sdio_intr_rstatus(struct brcmf_sdio *bus)
 {
 	struct brcmf_core *buscore;
@@ -2588,7 +2597,7 @@ static int brcmf_sdio_intr_rstatus(struct brcmf_sdio *bus)
 	if (val) {
 		brcmf_sdiod_regwl(bus->sdiodev, addr, val, &ret);
 		bus->sdcnt.f1regdata++;
-		atomic_or(val, &bus->intstatus);
+		atomic_orr(val, &bus->intstatus);
 	}
 
 	return ret;
@@ -2705,7 +2714,7 @@ static void brcmf_sdio_dpc(struct brcmf_sdio *bus)
 
 	/* Keep still-pending events for next scheduling */
 	if (intstatus)
-		atomic_or(intstatus, &bus->intstatus);
+		atomic_orr(intstatus, &bus->intstatus);
 
 	brcmf_sdio_clrintr(bus);
 
@@ -2813,8 +2822,6 @@ static int brcmf_sdio_bus_txdata(struct device *dev, struct sk_buff *pkt)
 	struct brcmf_sdio *bus = sdiodev->bus;
 
 	brcmf_dbg(TRACE, "Enter: pkt: data %p len %d\n", pkt->data, pkt->len);
-	if (sdiodev->state != BRCMF_SDIOD_DATA)
-		return -EIO;
 
 	/* Add space for the header */
 	skb_push(pkt, bus->tx_hdrlen);
@@ -2943,8 +2950,6 @@ brcmf_sdio_bus_txctl(struct device *dev, unsigned char *msg, uint msglen)
 	int ret;
 
 	brcmf_dbg(TRACE, "Enter\n");
-	if (sdiodev->state != BRCMF_SDIOD_DATA)
-		return -EIO;
 
 	/* Send from dpc */
 	bus->ctrl_frame_buf = msg;
@@ -3206,8 +3211,6 @@ static void brcmf_sdio_debugfs_create(struct brcmf_sdio *bus)
 	if (IS_ERR_OR_NULL(dentry))
 		return;
 
-	bus->console_interval = BRCMF_CONSOLE;
-
 	brcmf_debugfs_add_entry(drvr, "forensics", brcmf_sdio_forensic_read);
 	brcmf_debugfs_add_entry(drvr, "counters",
 				brcmf_debugfs_sdio_count_read);
@@ -3237,8 +3240,6 @@ brcmf_sdio_bus_rxctl(struct device *dev, unsigned char *msg, uint msglen)
 	struct brcmf_sdio *bus = sdiodev->bus;
 
 	brcmf_dbg(TRACE, "Enter\n");
-	if (sdiodev->state != BRCMF_SDIOD_DATA)
-		return -EIO;
 
 	/* Wait until control frame is available */
 	timeleft = brcmf_sdio_dcmd_resp_wait(bus, &bus->rxlen, &pending);
@@ -3539,51 +3540,6 @@ done:
 	return err;
 }
 
-static size_t brcmf_sdio_bus_get_ramsize(struct device *dev)
-{
-	struct brcmf_bus *bus_if = dev_get_drvdata(dev);
-	struct brcmf_sdio_dev *sdiodev = bus_if->bus_priv.sdio;
-	struct brcmf_sdio *bus = sdiodev->bus;
-
-	return bus->ci->ramsize - bus->ci->srsize;
-}
-
-static int brcmf_sdio_bus_get_memdump(struct device *dev, void *data,
-				      size_t mem_size)
-{
-	struct brcmf_bus *bus_if = dev_get_drvdata(dev);
-	struct brcmf_sdio_dev *sdiodev = bus_if->bus_priv.sdio;
-	struct brcmf_sdio *bus = sdiodev->bus;
-	int err;
-	int address;
-	int offset;
-	int len;
-
-	brcmf_dbg(INFO, "dump at 0x%08x: size=%zu\n", bus->ci->rambase,
-		  mem_size);
-
-	address = bus->ci->rambase;
-	offset = err = 0;
-	sdio_claim_host(sdiodev->func[1]);
-	while (offset < mem_size) {
-		len = ((offset + MEMBLOCK) < mem_size) ? MEMBLOCK :
-		      mem_size - offset;
-		err = brcmf_sdiod_ramrw(sdiodev, false, address, data, len);
-		if (err) {
-			brcmf_err("error %d on reading %d membytes at 0x%08x\n",
-				  err, len, address);
-			goto done;
-		}
-		data += len;
-		offset += len;
-		address += len;
-	}
-
-done:
-	sdio_release_host(sdiodev->func[1]);
-	return err;
-}
-
 void brcmf_sdio_trigger_dpc(struct brcmf_sdio *bus)
 {
 	if (!bus->dpc_triggered) {
@@ -3601,6 +3557,10 @@ void brcmf_sdio_isr(struct brcmf_sdio *bus)
 		return;
 	}
 
+	if (bus->sdiodev->state != BRCMF_SDIOD_DATA) {
+		brcmf_err("bus is down. we have nothing to do\n");
+		return;
+	}
 	/* Count the interrupt call */
 	bus->sdcnt.intrcount++;
 	if (in_interrupt())
@@ -3662,7 +3622,7 @@ static void brcmf_sdio_bus_watchdog(struct brcmf_sdio *bus)
 	}
 #ifdef DEBUG
 	/* Poll for console output periodically */
-	if (bus->sdiodev->state == BRCMF_SDIOD_DATA && BRCMF_FWCON_ON() &&
+	if (bus->sdiodev->state == BRCMF_SDIOD_DATA &&
 	    bus->console_interval != 0) {
 		bus->console.count += BRCMF_WD_POLL_MS;
 		if (bus->console.count >= bus->console_interval) {
@@ -3743,6 +3703,21 @@ brcmf_sdio_drivestrengthinit(struct brcmf_sdio_dev *sdiodev,
 		str_shift = 11;
 		break;
 	case SDIOD_DRVSTR_KEY(BRCM_CC_4334_CHIP_ID, 17):
+		str_tab = sdiod_drvstr_tab6_1v8;
+		str_mask = 0x00001800;
+		str_shift = 11;
+		break;
+	case SDIOD_DRVSTR_KEY(BRCM_CC_43340_CHIP_ID, 20):
+		str_tab = sdiod_drvstr_tab6_1v8;
+		str_mask = 0x00001800;
+		str_shift = 11;
+		break;
+	case SDIOD_DRVSTR_KEY(BRCM_CC_43341_CHIP_ID, 20):
+		str_tab = sdiod_drvstr_tab6_1v8;
+		str_mask = 0x00001800;
+		str_shift = 11;
+		break;
+	case SDIOD_DRVSTR_KEY(BRCM_CC_43430_CHIP_ID, 24):
 		str_tab = sdiod_drvstr_tab6_1v8;
 		str_mask = 0x00001800;
 		str_shift = 11;
@@ -4032,9 +4007,7 @@ static struct brcmf_bus_ops brcmf_sdio_bus_ops = {
 	.txctl = brcmf_sdio_bus_txctl,
 	.rxctl = brcmf_sdio_bus_rxctl,
 	.gettxq = brcmf_sdio_bus_gettxq,
-	.wowl_config = brcmf_sdio_wowl_config,
-	.get_ramsize = brcmf_sdio_bus_get_ramsize,
-	.get_memdump = brcmf_sdio_bus_get_memdump,
+	.wowl_config = brcmf_sdio_wowl_config
 };
 
 static void brcmf_sdio_firmware_callback(struct device *dev,

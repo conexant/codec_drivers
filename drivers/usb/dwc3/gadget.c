@@ -35,6 +35,9 @@
 #include "gadget.h"
 #include "io.h"
 
+static void dwc3_gadget_disable_irq(struct dwc3 *dwc);
+static int dwc3_gadget_restart(struct dwc3 *dwc);
+
 /**
  * dwc3_gadget_set_test_mode - Enables USB2 Test Modes
  * @dwc: pointer to our context structure
@@ -1122,20 +1125,6 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	list_add_tail(&req->list, &dep->request_list);
 
 	/*
-	 * If there are no pending requests and the endpoint isn't already
-	 * busy, we will just start the request straight away.
-	 *
-	 * This will save one IRQ (XFER_NOT_READY) and possibly make it a
-	 * little bit faster.
-	 */
-	if (!usb_endpoint_xfer_isoc(dep->endpoint.desc) &&
-			!usb_endpoint_xfer_int(dep->endpoint.desc) &&
-			!(dep->flags & DWC3_EP_BUSY)) {
-		ret = __dwc3_gadget_kick_transfer(dep, 0, true);
-		goto out;
-	}
-
-	/*
 	 * There are a few special cases:
 	 *
 	 * 1. XferNotReady with empty list of requests. We need to kick the
@@ -1200,6 +1189,32 @@ out:
 	return ret;
 }
 
+static void __dwc3_gadget_ep_zlp_complete(struct usb_ep *ep,
+		struct usb_request *request)
+{
+	dwc3_gadget_ep_free_request(ep, request);
+}
+
+static int __dwc3_gadget_ep_queue_zlp(struct dwc3 *dwc, struct dwc3_ep *dep)
+{
+	struct dwc3_request		*req;
+	struct usb_request		*request;
+	struct usb_ep			*ep = &dep->endpoint;
+
+	dwc3_trace(trace_dwc3_gadget, "queueing ZLP\n");
+	request = dwc3_gadget_ep_alloc_request(ep, GFP_ATOMIC);
+	if (!request)
+		return -ENOMEM;
+
+	request->length = 0;
+	request->buf = dwc->zlp_buf;
+	request->complete = __dwc3_gadget_ep_zlp_complete;
+
+	req = to_dwc3_request(request);
+
+	return __dwc3_gadget_ep_queue(dep, req);
+}
+
 static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
 	gfp_t gfp_flags)
 {
@@ -1226,6 +1241,16 @@ static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
 	}
 
 	ret = __dwc3_gadget_ep_queue(dep, req);
+
+	/*
+	 * Okay, here's the thing, if gadget driver has requested for a ZLP by
+	 * setting request->zero, instead of doing magic, we will just queue an
+	 * extra usb_request ourselves so that it gets handled the same way as
+	 * any other request.
+	 */
+	if (ret == 0 && request->zero && request->length &&
+	    (request->length % ep->maxpacket == 0))
+		ret = __dwc3_gadget_ep_queue_zlp(dwc, dep);
 
 out:
 	spin_unlock_irqrestore(&dwc->lock, flags);
@@ -1550,12 +1575,107 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 	struct dwc3		*dwc = gadget_to_dwc(g);
 	unsigned long		flags;
 	int			ret;
+	int			trys = 0;
 
 	is_on = !!is_on;
 
 	spin_lock_irqsave(&dwc->lock, flags);
 	ret = dwc3_gadget_run_stop(dwc, is_on, false);
+	if (is_on)
+		dwc->reset_event = 0;
 	spin_unlock_irqrestore(&dwc->lock, flags);
+
+try:
+	/**
+	 * WORKAROUND: DWC3 revision < 2.20a have an issue
+	 * which would cause metastability state on Run/Stop
+	 * bit if we try to force the IP to USB2-only mode.
+	 *
+	 * Because of that, we check if we hit that issue and
+	 * reset core and retry if we did.
+	 *
+	 * We only attempt this workaround if we are in
+	 * DEVICE mode (i.e. not OTG).
+	 *
+	 * Refers to:
+	 *
+	 * STAR#9000525659: Clock Domain Crossing on DCTL in
+	 * USB 2.0 Mode
+	 */
+	if (is_on && dwc->revision < DWC3_REVISION_220A &&
+	    dwc->current_mode == DWC3_GCTL_PRTCAP_DEVICE) {
+		u32 devspd, ltssm;
+		int i;
+
+		/* only applicable if devspd != SUPERSPEED */
+		devspd = dwc3_readl(dwc->regs, DWC3_DCFG) & DWC3_DCFG_SPEED_MASK;
+		if (devspd == DWC3_DCFG_SUPERSPEED)
+			goto done;
+
+		/**
+		 * Need to wait for 100ms and check if ltssm != 4 to detect
+		 * metastability issue. If we got a reset event then we are
+		 * safe and can continue.
+		 */
+		for (i = 0; i < 100; i++) {
+			if (dwc->reset_event)
+				goto done;
+
+			/* get link state */
+			ltssm = dwc3_readl(dwc->regs, DWC3_GDBGLTSSM);
+			ltssm = (ltssm >> 22) & 0xf;
+
+			/**
+			 * If link state != 4 we've hit the metastability issue.
+			 */
+			if (ltssm != 4)
+				break;
+
+			mdelay(1);
+		}
+
+		/**
+		 * If link state == 4 after 100ms, we've not hit the metastability issue.
+		 */
+		if (ltssm == 4)
+			goto done;
+
+		dwc3_trace(trace_dwc3_gadget,
+			   "applying metastability workaround\n");
+		trys++;
+		if (trys == 2) {
+			dev_WARN_ONCE(dwc->dev, true,
+				      "metastability workaround failed!\n");
+			return -ETIMEDOUT;
+		}
+
+		spin_lock_irqsave(&dwc->lock, flags);
+		/* stop gadget */
+		dwc3_gadget_disable_irq(dwc);
+		__dwc3_gadget_ep_disable(dwc->eps[0]);
+		__dwc3_gadget_ep_disable(dwc->eps[1]);
+
+		/* soft reset device and restart */
+		ret = dwc3_device_reinit(dwc);
+		if (ret) {
+			dev_err(dwc->dev, "device reinit failed\n");
+			spin_unlock_irqrestore(&dwc->lock, flags);
+			return ret;
+		}
+
+		/* restart gadget */
+		ret = dwc3_gadget_restart(dwc);
+		if (ret) {
+			dev_err(dwc->dev, "failed to re-init gadget\n");
+			spin_unlock_irqrestore(&dwc->lock, flags);
+			return ret;
+		}
+
+		spin_unlock_irqrestore(&dwc->lock, flags);
+		goto try;
+	}
+
+done:
 
 	return ret;
 }
@@ -1587,36 +1707,11 @@ static void dwc3_gadget_disable_irq(struct dwc3 *dwc)
 static irqreturn_t dwc3_interrupt(int irq, void *_dwc);
 static irqreturn_t dwc3_thread_interrupt(int irq, void *_dwc);
 
-static int dwc3_gadget_start(struct usb_gadget *g,
-		struct usb_gadget_driver *driver)
+static int dwc3_gadget_restart(struct dwc3 *dwc)
 {
-	struct dwc3		*dwc = gadget_to_dwc(g);
 	struct dwc3_ep		*dep;
-	unsigned long		flags;
 	int			ret = 0;
-	int			irq;
 	u32			reg;
-
-	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
-	ret = request_threaded_irq(irq, dwc3_interrupt, dwc3_thread_interrupt,
-			IRQF_SHARED, "dwc3", dwc);
-	if (ret) {
-		dev_err(dwc->dev, "failed to request irq #%d --> %d\n",
-				irq, ret);
-		goto err0;
-	}
-
-	spin_lock_irqsave(&dwc->lock, flags);
-
-	if (dwc->gadget_driver) {
-		dev_err(dwc->dev, "%s is already bound to %s\n",
-				dwc->gadget.name,
-				dwc->gadget_driver->driver.name);
-		ret = -EBUSY;
-		goto err1;
-	}
-
-	dwc->gadget_driver	= driver;
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
 	reg &= ~(DWC3_DCFG_SPEED_MASK);
@@ -1629,12 +1724,15 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 	 * Because of that, we cannot configure the IP to any
 	 * speed other than the SuperSpeed
 	 *
+	 * For non OTG mode we can attempt softreset workaround.
+	 *
 	 * Refers to:
 	 *
 	 * STAR#9000525659: Clock Domain Crossing on DCTL in
 	 * USB 2.0 Mode
 	 */
-	if (dwc->revision < DWC3_REVISION_220A) {
+	if ((dwc->revision < DWC3_REVISION_220A) &&
+	     (dwc->current_mode == DWC3_GCTL_PRTCAP_OTG)) {
 		reg |= DWC3_DCFG_SUPERSPEED;
 	} else {
 		switch (dwc->maximum_speed) {
@@ -1663,7 +1761,7 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 			false);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
-		goto err2;
+		return ret;
 	}
 
 	dep = dwc->eps[1];
@@ -1671,7 +1769,7 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 			false);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
-		goto err3;
+		goto err;
 	}
 
 	/* begin to receive SETUP packets */
@@ -1680,12 +1778,50 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 
 	dwc3_gadget_enable_irq(dwc);
 
-	spin_unlock_irqrestore(&dwc->lock, flags);
-
 	return 0;
 
-err3:
+err:
 	__dwc3_gadget_ep_disable(dwc->eps[0]);
+	return ret;
+}
+
+static int dwc3_gadget_start(struct usb_gadget *g,
+		struct usb_gadget_driver *driver)
+{
+	struct dwc3		*dwc = gadget_to_dwc(g);
+	unsigned long		flags;
+	int			ret = 0;
+	int			irq;
+
+	irq = dwc->gadget_irq;
+	ret = request_threaded_irq(irq, dwc3_interrupt, dwc3_thread_interrupt,
+			IRQF_SHARED, "dwc3", dwc);
+	if (ret) {
+		dev_err(dwc->dev, "failed to request irq #%d --> %d\n",
+				irq, ret);
+		goto err0;
+	}
+
+	spin_lock_irqsave(&dwc->lock, flags);
+
+	if (dwc->gadget_driver) {
+		dev_err(dwc->dev, "%s is already bound to %s\n",
+				dwc->gadget.name,
+				dwc->gadget_driver->driver.name);
+		ret = -EBUSY;
+		goto err1;
+	}
+
+	dwc->gadget_driver	= driver;
+
+	ret = dwc3_gadget_restart(dwc);
+	if (ret) {
+		dev_err(dwc->dev, "gadget start failed\n");
+		goto err2;
+	}
+
+	spin_unlock_irqrestore(&dwc->lock, flags);
+	return 0;
 
 err2:
 	dwc->gadget_driver = NULL;
@@ -2299,6 +2435,9 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 			dwc3_gadget_disconnect_interrupt(dwc);
 	}
 
+	/* notify run/stop metastability workaround */
+	dwc->reset_event = 1;
+
 	dwc3_reset_gadget(dwc);
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
@@ -2798,6 +2937,12 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 		goto err3;
 	}
 
+	dwc->zlp_buf = kzalloc(DWC3_ZLP_BUF_SIZE, GFP_KERNEL);
+	if (!dwc->zlp_buf) {
+		ret = -ENOMEM;
+		goto err4;
+	}
+
 	dwc->gadget.ops			= &dwc3_gadget_ops;
 	dwc->gadget.speed		= USB_SPEED_UNKNOWN;
 	dwc->gadget.sg_supported	= true;
@@ -2839,15 +2984,18 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 
 	ret = dwc3_gadget_init_endpoints(dwc);
 	if (ret)
-		goto err4;
+		goto err5;
 
 	ret = usb_add_gadget_udc(dwc->dev, &dwc->gadget);
 	if (ret) {
 		dev_err(dwc->dev, "failed to register udc\n");
-		goto err4;
+		goto err5;
 	}
 
 	return 0;
+
+err5:
+	kfree(dwc->zlp_buf);
 
 err4:
 	dwc3_gadget_free_endpoints(dwc);
@@ -2881,6 +3029,7 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 			dwc->ep0_bounce, dwc->ep0_bounce_addr);
 
 	kfree(dwc->setup_buf);
+	kfree(dwc->zlp_buf);
 
 	dma_free_coherent(dwc->dev, sizeof(*dwc->ep0_trb) * 2,
 			dwc->ep0_trb, dwc->ep0_trb_addr);
@@ -2891,9 +3040,26 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 
 int dwc3_gadget_suspend(struct dwc3 *dwc)
 {
+	int num_endpoints = dwc->num_in_eps + dwc->num_out_eps;
+	int i;
+
+	if (!dwc->gadget_driver)
+		return 0;
+
 	if (dwc->pullups_connected) {
 		dwc3_gadget_disable_irq(dwc);
-		dwc3_gadget_run_stop(dwc, true, true);
+		dwc3_gadget_run_stop(dwc, false, true);
+		dwc->start_on_resume = true;
+	}
+
+	for (i = 0; i < num_endpoints; i++) {
+		struct dwc3_ep *dep = dwc->eps[i];
+
+		if (!dep)
+			continue;
+
+		dep->resource_index = 0;
+		dep->flags &= ~DWC3_EP_BUSY;
 	}
 
 	__dwc3_gadget_ep_disable(dwc->eps[0]);
@@ -2908,6 +3074,9 @@ int dwc3_gadget_resume(struct dwc3 *dwc)
 {
 	struct dwc3_ep		*dep;
 	int			ret;
+
+	if (!dwc->gadget_driver)
+		return 0;
 
 	/* Start with SuperSpeed Default */
 	dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);
@@ -2930,7 +3099,8 @@ int dwc3_gadget_resume(struct dwc3 *dwc)
 
 	dwc3_writel(dwc->regs, DWC3_DCFG, dwc->dcfg);
 
-	if (dwc->pullups_connected) {
+	if (dwc->start_on_resume) {
+		dwc->start_on_resume = false;
 		dwc3_gadget_enable_irq(dwc);
 		dwc3_gadget_run_stop(dwc, true, false);
 	}

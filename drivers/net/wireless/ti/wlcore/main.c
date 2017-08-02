@@ -303,25 +303,11 @@ out:
 
 static void wlcore_adjust_conf(struct wl1271 *wl)
 {
-	/* Adjust settings according to optional module parameters */
-
-	/* Firmware Logger params */
-	if (fwlog_mem_blocks != -1) {
-		if (fwlog_mem_blocks >= CONF_FWLOG_MIN_MEM_BLOCKS &&
-		    fwlog_mem_blocks <= CONF_FWLOG_MAX_MEM_BLOCKS) {
-			wl->conf.fwlog.mem_blocks = fwlog_mem_blocks;
-		} else {
-			wl1271_error(
-				"Illegal fwlog_mem_blocks=%d using default %d",
-				fwlog_mem_blocks, wl->conf.fwlog.mem_blocks);
-		}
-	}
 
 	if (fwlog_param) {
 		if (!strcmp(fwlog_param, "continuous")) {
 			wl->conf.fwlog.mode = WL12XX_FWLOG_CONTINUOUS;
-		} else if (!strcmp(fwlog_param, "ondemand")) {
-			wl->conf.fwlog.mode = WL12XX_FWLOG_ON_DEMAND;
+			wl->conf.fwlog.output = WL12XX_FWLOG_OUTPUT_HOST;
 		} else if (!strcmp(fwlog_param, "dbgpins")) {
 			wl->conf.fwlog.mode = WL12XX_FWLOG_CONTINUOUS;
 			wl->conf.fwlog.output = WL12XX_FWLOG_OUTPUT_DBG_PINS;
@@ -674,6 +660,10 @@ static irqreturn_t wlcore_irq(int irq, void *cookie)
 		wl1271_debug(DEBUG_IRQ, "should not enqueue work");
 		disable_irq_nosync(wl->irq);
 		pm_wakeup_event(wl->dev, 0);
+#ifdef CONFIG_HAS_WAKELOCK
+		if (!test_and_set_bit(WL1271_FLAG_WAKE_LOCK, &wl->flags))
+			wake_lock(&wl->wake_lock);
+#endif
 		spin_unlock_irqrestore(&wl->wl_lock, flags);
 		return IRQ_HANDLED;
 	}
@@ -695,6 +685,11 @@ static irqreturn_t wlcore_irq(int irq, void *cookie)
 	if (!test_bit(WL1271_FLAG_FW_TX_BUSY, &wl->flags) &&
 	    wl1271_tx_total_queue_count(wl) > 0)
 		ieee80211_queue_work(wl->hw, &wl->tx_work);
+
+#ifdef CONFIG_HAS_WAKELOCK
+	if (test_and_clear_bit(WL1271_FLAG_WAKE_LOCK, &wl->flags))
+		wake_unlock(&wl->wake_lock);
+#endif
 	spin_unlock_irqrestore(&wl->wl_lock, flags);
 
 	mutex_unlock(&wl->mutex);
@@ -805,6 +800,10 @@ void wl12xx_queue_recovery_work(struct wl1271 *wl)
 		set_bit(WL1271_FLAG_RECOVERY_IN_PROGRESS, &wl->flags);
 		wl1271_ps_elp_wakeup(wl);
 		wlcore_disable_interrupts_nosync(wl);
+#ifdef CONFIG_HAS_WAKELOCK
+		/* give us a grace period for recovery */
+		wake_lock_timeout(&wl->recovery_wake, 5 * HZ);
+#endif
 		ieee80211_queue_work(wl->hw, &wl->recovery_work);
 	}
 }
@@ -825,22 +824,12 @@ size_t wl12xx_copy_fwlog(struct wl1271 *wl, u8 *memblock, size_t maxlen)
 
 static void wl12xx_read_fwlog_panic(struct wl1271 *wl)
 {
-	struct wlcore_partition_set part, old_part;
-	u32 addr;
-	u32 offset;
-	u32 end_of_log;
-	u8 *block;
-	int ret;
+	u32 end_of_log = 0;
 
-	if ((wl->quirks & WLCORE_QUIRK_FWLOG_NOT_IMPLEMENTED) ||
-	    (wl->conf.fwlog.mem_blocks == 0))
+	if (wl->quirks & WLCORE_QUIRK_FWLOG_NOT_IMPLEMENTED)
 		return;
 
 	wl1271_info("Reading FW panic log");
-
-	block = kmalloc(wl->fw_mem_block_size, GFP_KERNEL);
-	if (!block)
-		return;
 
 	/*
 	 * Make sure the chip is awake and the logger isn't active.
@@ -848,68 +837,19 @@ static void wl12xx_read_fwlog_panic(struct wl1271 *wl)
 	 * dbgpins are used (due to some fw bug).
 	 */
 	if (wl1271_ps_elp_wakeup(wl))
-		goto out;
+		return;
 	if (!wl->watchdog_recovery &&
 	    wl->conf.fwlog.output != WL12XX_FWLOG_OUTPUT_DBG_PINS)
 		wl12xx_cmd_stop_fwlog(wl);
 
-	/* Read the first memory block address */
-	ret = wlcore_fw_status(wl, wl->fw_status);
-	if (ret < 0)
-		goto out;
-
-	addr = wl->fw_status->log_start_addr;
-	if (!addr)
-		goto out;
-
-	if (wl->conf.fwlog.mode == WL12XX_FWLOG_CONTINUOUS) {
-		offset = sizeof(addr) + sizeof(struct wl1271_rx_descriptor);
-		end_of_log = wl->fwlog_end;
-	} else {
-		offset = sizeof(addr);
-		end_of_log = addr;
-	}
-
-	old_part = wl->curr_part;
-	memset(&part, 0, sizeof(part));
-
 	/* Traverse the memory blocks linked list */
 	do {
-		part.mem.start = wlcore_hw_convert_hwaddr(wl, addr);
-		part.mem.size  = PAGE_SIZE;
-
-		ret = wlcore_set_partition(wl, &part);
-		if (ret < 0) {
-			wl1271_error("%s: set_partition start=0x%X size=%d",
-				__func__, part.mem.start, part.mem.size);
-			goto out;
+		end_of_log = wlcore_event_fw_logger(wl);
+		if (end_of_log == 0) {
+			msleep(100);
+			end_of_log = wlcore_event_fw_logger(wl);
 		}
-
-		memset(block, 0, wl->fw_mem_block_size);
-		ret = wlcore_read_hwaddr(wl, addr, block,
-					wl->fw_mem_block_size, false);
-
-		if (ret < 0)
-			goto out;
-
-		/*
-		 * Memory blocks are linked to one another. The first 4 bytes
-		 * of each memory block hold the hardware address of the next
-		 * one. The last memory block points to the first one in
-		 * on demand mode and is equal to 0x2000000 in continuous mode.
-		 */
-		addr = le32_to_cpup((__le32 *)block);
-
-		if (!wl12xx_copy_fwlog(wl, block + offset,
-					wl->fw_mem_block_size - offset))
-			break;
-	} while (addr && (addr != end_of_log));
-
-	wake_up_interruptible(&wl->fwlog_waitq);
-
-out:
-	kfree(block);
-	wlcore_set_partition(wl, &old_part);
+	} while (end_of_log != 0);
 }
 
 static void wlcore_save_freed_pkts(struct wl1271 *wl, struct wl12xx_vif *wlvif,
@@ -1777,6 +1717,10 @@ static int wl1271_op_suspend(struct ieee80211_hw *hw,
 	/* we want to perform the recovery before suspending */
 	if (test_bit(WL1271_FLAG_RECOVERY_IN_PROGRESS, &wl->flags)) {
 		wl1271_warning("postponing suspend to perform recovery");
+#ifdef CONFIG_HAS_WAKELOCK
+		/* give us a grace period for recovery */
+		wake_lock_timeout(&wl->recovery_wake, 5 * HZ);
+#endif
 		return -EBUSY;
 	}
 
@@ -1923,6 +1867,12 @@ out_sleep:
 	wl1271_ps_elp_sleep(wl);
 
 out:
+#ifdef CONFIG_HAS_WAKELOCK
+	spin_lock_irqsave(&wl->wl_lock, flags);
+	if (test_and_clear_bit(WL1271_FLAG_WAKE_LOCK, &wl->flags))
+		wake_unlock(&wl->wake_lock);
+	spin_unlock_irqrestore(&wl->wl_lock, flags);
+#endif
 	wl->wow_enabled = false;
 
 	/*
@@ -5259,6 +5209,48 @@ out:
 	return ret;
 }
 
+int wlcore_rx_ba_max_subframes(struct wl1271 *wl, u8 hlid)
+{
+	struct wl12xx_vif *wlvif;
+	struct ieee80211_vif *vif;
+	struct ieee80211_sta *sta;
+
+	int win_size;
+
+	wlvif = wl->links[hlid].wlvif;
+	if (unlikely(!wlvif)) {
+		win_size = -EINVAL;
+		wl1271_error("wlvif for hlid %d is null", hlid);
+		goto out;
+	}
+
+	vif = wl12xx_wlvif_to_vif(wlvif);
+	if (unlikely(!vif)) {
+		win_size = -EINVAL;
+		wl1271_error("vif for hlid %d is null", hlid);
+		goto out;
+	}
+
+	rcu_read_lock();
+	sta = ieee80211_find_sta(vif, wlvif->bss_type != BSS_TYPE_AP_BSS ?
+					   vif->bss_conf.bssid :
+					   wl->links[hlid].addr);
+	if (unlikely(!sta)) {
+		win_size = -EINVAL;
+		wl1271_error("sta for hlid %d is null", hlid);
+
+		rcu_read_unlock();
+		goto out;
+	}
+
+	win_size = sta->max_rx_aggregation_subframes;
+	rcu_read_unlock();
+
+out:
+	return win_size;
+}
+EXPORT_SYMBOL_GPL(wlcore_rx_ba_max_subframes);
+
 static int wl1271_op_ampdu_action(struct ieee80211_hw *hw,
 				  struct ieee80211_vif *vif,
 				  enum ieee80211_ampdu_mlme_action action,
@@ -5269,6 +5261,7 @@ static int wl1271_op_ampdu_action(struct ieee80211_hw *hw,
 	struct wl12xx_vif *wlvif = wl12xx_vif_to_data(vif);
 	int ret;
 	u8 hlid, *ba_bitmap;
+	int win_size;
 
 	wl1271_debug(DEBUG_MAC80211, "mac80211 ampdu action %d tid %d", action,
 		     tid);
@@ -5325,8 +5318,15 @@ static int wl1271_op_ampdu_action(struct ieee80211_hw *hw,
 			break;
 		}
 
+		win_size = wlcore_rx_ba_max_subframes(wl, hlid);
+		if (win_size < 0) {
+			ret = -EINVAL;
+			wl1271_error("cannot get link rx_ba_max_subframes");
+			break;
+		}
+
 		ret = wl12xx_acx_set_ba_receiver_session(wl, tid, *ssn, true,
-							 hlid);
+							 hlid, win_size);
 		if (!ret) {
 			*ba_bitmap |= BIT(tid);
 			wl->ba_rx_session_count++;
@@ -5347,7 +5347,7 @@ static int wl1271_op_ampdu_action(struct ieee80211_hw *hw,
 		}
 
 		ret = wl12xx_acx_set_ba_receiver_session(wl, tid, 0, false,
-							 hlid);
+							 hlid, 0);
 		if (!ret) {
 			*ba_bitmap &= ~BIT(tid);
 			wl->ba_rx_session_count--;
@@ -5580,9 +5580,10 @@ static int wlcore_op_remain_on_channel(struct ieee80211_hw *hw,
 		goto out;
 
 	/* return EBUSY if we can't ROC right now */
-	if (WARN_ON(wl->roc_vif ||
-		    find_first_bit(wl->roc_map,
-				   WL12XX_MAX_ROLES) < WL12XX_MAX_ROLES)) {
+	if (wl->roc_vif ||
+	    find_first_bit(wl->roc_map, WL12XX_MAX_ROLES) < WL12XX_MAX_ROLES) {
+		wl1271_warning("active roc on role %d",
+			       find_first_bit(wl->roc_map, WL12XX_MAX_ROLES));
 		ret = -EBUSY;
 		goto out;
 	}
@@ -6291,7 +6292,6 @@ struct ieee80211_hw *wlcore_alloc_hw(size_t priv_size, u32 aggr_buf_size,
 	wl->active_sta_count = 0;
 	wl->active_link_count = 0;
 	wl->fwlog_size = 0;
-	init_waitqueue_head(&wl->fwlog_waitq);
 
 	/* The system link is always allocated */
 	__set_bit(WL12XX_SYSTEM_HLID, wl->links_map);
@@ -6301,6 +6301,11 @@ struct ieee80211_hw *wlcore_alloc_hw(size_t priv_size, u32 aggr_buf_size,
 		wl->tx_frames[i] = NULL;
 
 	spin_lock_init(&wl->wl_lock);
+#ifdef CONFIG_HAS_WAKELOCK
+	wake_lock_init(&wl->wake_lock, WAKE_LOCK_SUSPEND, "wl1271_wake");
+	wake_lock_init(&wl->rx_wake, WAKE_LOCK_SUSPEND, "rx_wake");
+	wake_lock_init(&wl->recovery_wake, WAKE_LOCK_SUSPEND, "recovery_wake");
+#endif
 
 	wl->state = WLCORE_STATE_OFF;
 	wl->fw_type = WL12XX_FW_TYPE_NONE;
@@ -6357,6 +6362,11 @@ err_aggr:
 	free_pages((unsigned long)wl->aggr_buf, order);
 
 err_wq:
+#ifdef CONFIG_HAS_WAKELOCK
+	wake_lock_destroy(&wl->wake_lock);
+	wake_lock_destroy(&wl->rx_wake);
+	wake_lock_destroy(&wl->recovery_wake);
+#endif
 	destroy_workqueue(wl->freezable_wq);
 
 err_hw:
@@ -6374,10 +6384,14 @@ EXPORT_SYMBOL_GPL(wlcore_alloc_hw);
 
 int wlcore_free_hw(struct wl1271 *wl)
 {
+#ifdef CONFIG_HAS_WAKELOCK
+	wake_lock_destroy(&wl->wake_lock);
+	wake_lock_destroy(&wl->rx_wake);
+	wake_lock_destroy(&wl->recovery_wake);
+#endif
 	/* Unblock any fwlog readers */
 	mutex_lock(&wl->mutex);
 	wl->fwlog_size = -1;
-	wake_up_interruptible_all(&wl->fwlog_waitq);
 	mutex_unlock(&wl->mutex);
 
 	wlcore_sysfs_free(wl);
@@ -6584,7 +6598,7 @@ MODULE_PARM_DESC(debug_level, "wl12xx debugging level");
 
 module_param_named(fwlog, fwlog_param, charp, 0);
 MODULE_PARM_DESC(fwlog,
-		 "FW logger options: continuous, ondemand, dbgpins or disable");
+		 "FW logger options: continuous, dbgpins or disable");
 
 module_param(fwlog_mem_blocks, int, S_IRUSR | S_IWUSR);
 MODULE_PARM_DESC(fwlog_mem_blocks, "fwlog mem_blocks");

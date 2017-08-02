@@ -1,9 +1,15 @@
 ifeq ($(CONFIG_OF),y)
 
+ifeq ($(CONFIG_OF_OVERLAY),y)
+DTC_FLAGS += -@
+endif
+
 dtb-$(CONFIG_ARCH_ALPINE) += \
 	alpine-db.dtb
+
 dtb-$(CONFIG_MACH_ASM9260) += \
 	alphascale-asm9260-devkit.dtb
+
 # Keep at91 dtb files sorted alphabetically for each SoC
 dtb-$(CONFIG_SOC_SAM_V4_V5) += \
 	at91rm9200ek.dtb \
@@ -148,9 +154,12 @@ dtb-$(CONFIG_ARCH_INTEGRATOR) += \
 	integratorap.dtb \
 	integratorcp.dtb
 dtb-$(CONFIG_ARCH_KEYSTONE) += \
-	k2hk-evm.dtb \
-	k2l-evm.dtb \
-	k2e-evm.dtb
+	keystone-k2hk-evm.dtb \
+	keystone-k2l-evm.dtb \
+	keystone-k2e-evm.dtb \
+	keystone-k2g-evm.dtb \
+	keystone-k2g-evm-lcd.dtb \
+	keystone-k2g-ice.dtb
 dtb-$(CONFIG_MACH_KIRKWOOD) += \
 	kirkwood-b3.dtb \
 	kirkwood-blackarmor-nas220.dtb \
@@ -458,10 +467,45 @@ dtb-$(CONFIG_SOC_AM33XX) += \
 	am335x-base0033.dtb \
 	am335x-bone.dtb \
 	am335x-boneblack.dtb \
+	am335x-pocketbone.dtb \
+	am335x-sancloud-bbe-uboot.dtb \
+	am335x-boneblack-uboot.dtb \
+	am335x-bonegreen-modio.dtb \
+	am335x-boneblack-modio.dtb \
+	am335x-siriusDEB.dtb \
+	am57xx-beagle-x15-revb1-ctag.dtb \
+	am335x-boneblack-lcd-ct43.dtb \
+	am335x-vsc8531bbb.dtb \
+	am335x-bonegreen-ctag-face.dtb \
+	am335x-boneblack-ctag-face.dtb \
+	am335x-sancloud-bbe.dtb \
+	am335x-boneblack-wireless-roboticscape.dtb \
+	am335x-boneblack-roboticscape.dtb \
+	am335x-boneblue-ArduPilot.dtb \
+	am335x-boneblue.dtb \
+	am335x-boneblack-audio.dtb \
+	am335x-boneblack-bbb-exp-r.dtb \
+	am335x-boneblack-bbb-exp-c.dtb \
+	am335x-boneblack-bbbmini.dtb \
+	am335x-boneblack-wireless-emmc-overlay.dtb \
+	am335x-boneblack-wireless.dtb \
+	am335x-boneblack-wl1835mod.dtb \
+	am335x-boneblack-cape-bone-argus.dtb \
+	am335x-bone-cape-bone-argus.dtb \
+	am335x-arduino-tre.dtb \
+	am335x-bonegreen-wireless.dtb \
+	am335x-olimex-som.dtb \
+	am335x-abbbi.dtb \
+	am335x-bonegreen-overlay.dtb \
+	am335x-boneblack-overlay.dtb \
+	am335x-boneblack-nhdmi-overlay.dtb \
+	am335x-boneblack-hdmi-overlay.dtb \
+	am335x-boneblack-emmc-overlay.dtb \
 	am335x-bonegreen.dtb \
 	am335x-sl50.dtb \
 	am335x-evm.dtb \
 	am335x-evmsk.dtb \
+	am335x-icev2.dtb \
 	am335x-nano.dtb \
 	am335x-pepper.dtb \
 	am335x-lxm.dtb \
@@ -480,7 +524,8 @@ dtb-$(CONFIG_SOC_AM43XX) += \
 	am43x-epos-evm.dtb \
 	am437x-sk-evm.dtb \
 	am437x-idk-evm.dtb \
-	am437x-gp-evm.dtb
+	am437x-gp-evm.dtb \
+	am437x-gp-evm-hdmi.dtb
 dtb-$(CONFIG_SOC_OMAP5) += \
 	omap5-cm-t54.dtb \
 	omap5-igep0050.dtb \
@@ -488,8 +533,31 @@ dtb-$(CONFIG_SOC_OMAP5) += \
 	omap5-uevm.dtb
 dtb-$(CONFIG_SOC_DRA7XX) += \
 	dra7-evm.dtb \
+	dra7-evm-lcd-lg.dtb \
+	dra7-evm-lcd-osd.dtb \
+	dra7-evm-lcd-osd101t2587.dtb \
 	am57xx-beagle-x15.dtb \
-	dra72-evm.dtb
+	am57xx-beagle-x15-revb1.dtb \
+	am57xx-beagle-x15-revc.dtb \
+	am571x-idk.dtb \
+	am571x-idk-lcd-osd.dtb \
+	am571x-idk-lcd-osd101t2587.dtb \
+	am571x-sndrblock.dtb \
+	am57xx-beagle-x15-ctag.dtb \
+	am572x-idk.dtb \
+	am572x-idk-lcd-osd.dtb \
+	am572x-idk-lcd-osd101t2587.dtb \
+	am57xx-evm.dtb \
+	am57xx-evm-reva3.dtb \
+	dra72-evm.dtb \
+	dra72-evm-lcd-lg.dtb \
+	dra72-evm-lcd-osd.dtb \
+	dra72-evm-lcd-osd101t2587.dtb \
+	dra72-evm-revc.dtb \
+	dra72-evm-revc-lcd-osd101t2045.dtb \
+	dra72-evm-revc-lcd-osd101t2587.dtb \
+	dra71-evm.dtb \
+	dra71-evm-lcd-auo-g101evn01.0.dtb
 dtb-$(CONFIG_ARCH_ORION5X) += \
 	orion5x-lacie-d2-network.dtb \
 	orion5x-lacie-ethernet-disk-mini-v2.dtb \

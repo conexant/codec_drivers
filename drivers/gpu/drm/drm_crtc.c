@@ -1470,6 +1470,41 @@ static int drm_mode_create_standard_properties(struct drm_device *dev)
 		return -ENOMEM;
 	dev->mode_config.prop_mode_id = prop;
 
+	prop = drm_property_create(dev,
+			DRM_MODE_PROP_BLOB,
+			"DEGAMMA_LUT", 0);
+	if (!prop)
+		return -ENOMEM;
+	dev->mode_config.degamma_lut_property = prop;
+
+	prop = drm_property_create_range(dev,
+			DRM_MODE_PROP_IMMUTABLE,
+			"DEGAMMA_LUT_SIZE", 0, UINT_MAX);
+	if (!prop)
+		return -ENOMEM;
+	dev->mode_config.degamma_lut_size_property = prop;
+
+	prop = drm_property_create(dev,
+			DRM_MODE_PROP_BLOB,
+			"CTM", 0);
+	if (!prop)
+		return -ENOMEM;
+	dev->mode_config.ctm_property = prop;
+
+	prop = drm_property_create(dev,
+			DRM_MODE_PROP_BLOB,
+			"GAMMA_LUT", 0);
+	if (!prop)
+		return -ENOMEM;
+	dev->mode_config.gamma_lut_property = prop;
+
+	prop = drm_property_create_range(dev,
+			DRM_MODE_PROP_IMMUTABLE,
+			"GAMMA_LUT_SIZE", 0, UINT_MAX);
+	if (!prop)
+		return -ENOMEM;
+	dev->mode_config.gamma_lut_size_property = prop;
+
 	return 0;
 }
 
@@ -2593,8 +2628,7 @@ int drm_crtc_check_viewport(const struct drm_crtc *crtc,
 	drm_crtc_get_hv_timing(mode, &hdisplay, &vdisplay);
 
 	if (crtc->state &&
-	    crtc->primary->state->rotation & (BIT(DRM_ROTATE_90) |
-					      BIT(DRM_ROTATE_270)))
+	    drm_rotation_90_or_270(crtc->primary->state->rotation))
 		swap(hdisplay, vdisplay);
 
 	return check_src_coords(x << 16, y << 16,
@@ -5031,6 +5065,20 @@ int drm_mode_connector_attach_encoder(struct drm_connector *connector,
 {
 	int i;
 
+	/*
+	 * In the past, drivers have attempted to model the static association
+	 * of connector to encoder in simple connector/encoder devices using a
+	 * direct assignment of connector->encoder = encoder. This connection
+	 * is a logical one and the responsibility of the core, so drivers are
+	 * expected not to mess with this.
+	 *
+	 * Note that the error return should've been enough here, but a large
+	 * majority of drivers ignores the return value, so add in a big WARN
+	 * to get people's attention.
+	 */
+	if (WARN_ON(connector->encoder))
+		return -EINVAL;
+
 	for (i = 0; i < DRM_CONNECTOR_MAX_ENCODER; i++) {
 		if (connector->encoder_ids[i] == 0) {
 			connector->encoder_ids[i] = encoder->base.id;
@@ -5957,3 +6005,48 @@ struct drm_tile_group *drm_mode_create_tile_group(struct drm_device *dev,
 	return tg;
 }
 EXPORT_SYMBOL(drm_mode_create_tile_group);
+
+/**
+ * drm_crtc_enable_color_mgmt - enable color management properties
+ * @crtc: DRM CRTC
+ * @degamma_lut_size: the size of the degamma lut (before CSC)
+ * @has_ctm: whether to attach ctm_property for CSC matrix
+ * @gamma_lut_size: the size of the gamma lut (after CSC)
+ *
+ * This function lets the driver enable the color correction
+ * properties on a CRTC. This includes 3 degamma, csc and gamma
+ * properties that userspace can set and 2 size properties to inform
+ * the userspace of the lut sizes. Each of the properties are
+ * optional. The gamma and degamma properties are only attached if
+ * their size is not 0 and ctm_property is only attached if has_ctm is
+ * true.
+ */
+void drm_crtc_enable_color_mgmt(struct drm_crtc *crtc,
+				uint degamma_lut_size,
+				bool has_ctm,
+				uint gamma_lut_size)
+{
+	struct drm_device *dev = crtc->dev;
+	struct drm_mode_config *config = &dev->mode_config;
+
+	if (degamma_lut_size) {
+		drm_object_attach_property(&crtc->base,
+					   config->degamma_lut_property, 0);
+		drm_object_attach_property(&crtc->base,
+					   config->degamma_lut_size_property,
+					   degamma_lut_size);
+	}
+
+	if (has_ctm)
+		drm_object_attach_property(&crtc->base,
+					   config->ctm_property, 0);
+
+	if (gamma_lut_size) {
+		drm_object_attach_property(&crtc->base,
+					   config->gamma_lut_property, 0);
+		drm_object_attach_property(&crtc->base,
+					   config->gamma_lut_size_property,
+					   gamma_lut_size);
+	}
+}
+EXPORT_SYMBOL(drm_crtc_enable_color_mgmt);
