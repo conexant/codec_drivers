@@ -101,11 +101,18 @@
 
 	mcasp0_pins: mcasp0_pins {
 		pinctrl-single,pins = <
-			AM33XX_IOPAD(0x9ac, PIN_INPUT_PULLUP | MUX_MODE0) /* mcasp0_ahcklx.mcasp0_ahclkx */
-			AM33XX_IOPAD(0x99c, PIN_OUTPUT_PULLDOWN | MUX_MODE2) /* mcasp0_ahclkr.mcasp0_axr2*/
-			AM33XX_IOPAD(0x994, PIN_OUTPUT_PULLUP | MUX_MODE0) /* mcasp0_fsx.mcasp0_fsx */
-			AM33XX_IOPAD(0x990, PIN_OUTPUT_PULLDOWN | MUX_MODE0) /* mcasp0_aclkx.mcasp0_aclkx */
-			AM33XX_IOPAD(0x86c, PIN_OUTPUT_PULLDOWN | MUX_MODE7) /* gpmc_a11.GPIO1_27 */
+			/* mcasp0_ahcklx.mcasp0_ahclkx */
+			AM33XX_IOPAD(0x9ac, PIN_INPUT_PULLUP | MUX_MODE0)
+			/* mcasp0_ahclkr.mcasp0_axr2*/
+			AM33XX_IOPAD(0x99c, PIN_OUTPUT_PULLDOWN | MUX_MODE2)
+			/* mcasp0_fsx.mcasp0_fsx */
+			AM33XX_IOPAD(0x994, PIN_INPUT_PULLUP | MUX_MODE0)
+			/* mcasp0_aclkx.mcasp0_aclkx */
+			AM33XX_IOPAD(0x990, PIN_INPUT_PULLDOWN | MUX_MODE0)
+			/* gpmc_a11.GPIO1_27 */
+			AM33XX_IOPAD(0x86c, PIN_OUTPUT_PULLDOWN | MUX_MODE7)
+			/* mcasp0_axr0 (AUD_DIN<-)*/
+			AM33XX_IOPAD(0x998, PIN_INPUT_PULLDOWN | MUX_MODE0)
 		>;
 	};
 };
@@ -152,6 +159,17 @@
 	};
 };
 
+&i2c2 {
+	cx2072x: cx2072x@33 {
+		#sound-dai-cells = <0>;
+		compatible = "cnxt,cx20721";
+		reg = <0x33>;
+		clocks = <&clk_mcasp0>;
+		clock-names = "mclk";
+		status = "okay";
+	};
+};
+
 &mcasp0	{
 	#sound-dai-cells = <0>;
 	pinctrl-names = "default";
@@ -159,8 +177,12 @@
 	status = "okay";
 	op-mode = <0>;	/* MCASP_IIS_MODE */
 	tdm-slots = <2>;
+	num-serializer = <16>;
 	serial-dir = <	/* 0: INACTIVE, 1: TX, 2: RX */
-			0 0 1 0
+			2 0 1 0
+			0 0 0 0
+			0 0 0 0
+			0 0 0 0
 		>;
 	tx-num-evt = <32>;
 	rx-num-evt = <32>;
@@ -182,18 +204,31 @@
 
 	sound {
 		compatible = "simple-audio-card";
-		simple-audio-card,name = "TI BeagleBone Black";
+		simple-audio-card,name = "cx-hifi-speaker";
 		simple-audio-card,format = "i2s";
+		simple-audio-card,routing =
+		"Headphone Jack", "PORTA",
+		"Ext Spk", "PORTG",
+		"PORTB", "Headset Mic";
+		simple-audio-card,widgets =
+		"Headphone", "Headphone Jack",
+		"Speaker", "Ext Spk",
+		"Microphone", "Headset Mic";
 		simple-audio-card,bitclock-master = <&dailink0_master>;
 		simple-audio-card,frame-master = <&dailink0_master>;
 
 		dailink0_master: simple-audio-card,cpu {
 			sound-dai = <&mcasp0>;
-			clocks = <&clk_mcasp0>;
+			/* clocks = <&clk_mcasp0>; */
+			system-clock-direction = "in";
+			system-clock-frequency = <24576000>;
 		};
 
 		simple-audio-card,codec {
-			sound-dai = <&tda19988>;
+			/* sound-dai = <&tda19988>; */
+			sound-dai = <&cx2072x>;
+			system-clock-direction = "in";
+			system-clock-frequency = <24576000>;
 		};
 	};
 };
