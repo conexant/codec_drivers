@@ -1,0 +1,5 @@
+Conexant audio with Smart Amplifier 2.
+
+Required properties:
+
+- compatible                            : "cnxt,cx9000-pi-i2s"
