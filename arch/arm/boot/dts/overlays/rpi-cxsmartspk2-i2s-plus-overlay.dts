@@ -1,0 +1,127 @@
+// Definitions for audioinjector.net audio add on soundcard
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2708";
+
+	fragment@0 {
+		target = <&i2s>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			cx9000: cx9000@33{
+				#sound-dai-cells = <1>;
+				compatible = "cnxt,cx9000";
+				reg = <0x33>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&enable_pins>;
+				enable-gpios = <&gpio 23 0>;
+				status = "okay";
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&sound>;
+		__overlay__ {
+			compatible = "simple-audio-card-plus";
+			pinctrl-names = "default", "mute";
+			pinctrl-0 = <&irq_pins>;
+			pinctrl-1 = <&mute_en_pins>;
+			irq-gpios = <&gpio 17 0>;
+			mute_en-gpios = <&gpio 26 0>;
+			simple-audio-card,name = "smartspk-cx9000";
+			simple-audio-card,mute-det-gpio = <&gpio 16 0>;
+			status = "okay";
+			/* I2S1 - cx9000-DSP */
+			simple-audio-card,dai-link@0 {
+				/*
+				 * format support:
+				 * i2s, left_j, right_j, dsp_a, dsp_b
+				 */
+				format = "i2s";
+				bitclock-master = <&dailink0_master>;
+				frame-master = <&dailink0_master>;
+				/*
+				 * bclk and fsync iversion support:
+				 * bitclock-inversion;
+				 * frame-inversion;
+				 */
+				/*
+				 * Frame size support:
+				 * BCLK = sample rate * bclk-ratio
+				 */
+				bclk-ratio = <64>;
+				cpu {
+					sound-dai = <&i2s>;
+				};
+				dailink0_master: codec {
+					sound-dai = <&cx9000 0>;
+					/*
+					 * MCLK (system clock) support:
+					 * system-clock-frequency = <12288000>;
+					 * system-clock-direction = "in";
+					 */
+				};
+				plat {
+					sound-dai = <&i2s>;
+				};
+			};
+		};
+	};
+
+	fragment@3 {
+		target = <&gpio>;
+		__overlay__ {
+			irq_pins: irq_pins {
+				brcm,pins = <17>; /* pin-11 */
+				brcm,function = <0>; /* in */
+				brcm,pull = <2>; /* upe */
+			};
+		};
+	};
+
+	fragment@4 {
+		target = <&gpio>;
+		__overlay__ {
+			enable_pins: enable_pins {
+				brcm,pins = <23>; /* pin-16 */
+				brcm,function = <1>; /* out */
+				brcm,pull = <1>; /* pu_down */
+			};
+		};
+	};
+
+	fragment@5 {
+		target = <&gpio>;
+		__overlay__ {
+			mute_pins: mute_pins {
+				brcm,pins = <16>; /* pin-36 */
+				brcm,function = <0>; /* in */
+				brcm,pull = <1>; /* pu_down */
+			};
+		};
+	};
+
+	fragment@6 {
+		target = <&gpio>;
+		__overlay__ {
+			mute_en_pins: mute_en_pins {
+				brcm,pins = <26>; /* pin-37 */
+				brcm,function = <1>; /* out */
+				brcm,pull = <1>; /* pu_down */
+			};
+		};
+	};
+
+};
