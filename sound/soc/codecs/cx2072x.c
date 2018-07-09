@@ -9,11 +9,11 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  28/6/17
- *  File Version:   4.4.62
+ *  Modified Date:  1/11/17
+ *  File Version:   4.4.64
  ************************************************************************/
 #define DEBUG
-#define DRIVER_VERSION "4.4.62"
+#define DRIVER_VERSION "4.4.64"
 /*#define ENABLE_MIC_POP_WA*/
 #define CXDBG_REG_DUMP
 
@@ -266,6 +266,7 @@ struct cx2072x_priv {
 	struct mutex eq_coeff_lock; /* EQ DSP lock */
 	struct mutex cache_only_lock; /* Cache only lock */
 	bool codec_power_on;
+	int num_chan_sel;
 };
 
 /*
@@ -342,7 +343,7 @@ static const struct reg_default cx2072x_reg_defaults[] = {
 	{ CX2072X_ADC1_AMP_GAIN_LEFT_5, 0x0000004a },
 	{ CX2072X_ADC1_AMP_GAIN_RIGHT_6, 0x0000004a },
 	{ CX2072X_ADC1_AMP_GAIN_LEFT_6, 0x0000004a },
-	{ CX2072X_ADC1_CONNECTION_SELECT_CONTROL, 0x00000000 },
+	{ CX2072X_ADC1_CONNECTION_SELECT_CONTROL, 0x00000003 },
 	{ CX2072X_ADC1_POWER_STATE, 0x00000433 },
 	{ CX2072X_ADC1_CONVERTER_STREAM_CHANNEL, 0x00000000 },
 	{ CX2072X_ADC2_CONVERTER_FORMAT, 0x00000031 },
@@ -942,7 +943,7 @@ static int cx2072x_config_i2spcm(struct cx2072x_priv *cx2072x)
 		reg2.r.tx_slot_1 = 0;
 		reg2.r.tx_slot_2 = i2s_right_slot;
 		reg3.r.rx_slot_1 = 0;
-		if (cx2072x->en_aec_ref)
+		if (cx2072x->en_aec_ref && cx2072x->num_chan_sel)
 			reg3.r.rx_slot_2 = 0;
 		else
 			reg3.r.rx_slot_2 = i2s_right_slot;
@@ -1507,6 +1508,64 @@ static int cx2072x_codec_power_switch_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int cx2072x_get_num_chan(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+#if (KERNEL_VERSION(3, 15, 0) > LINUX_VERSION_CODE)
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct cx2072x_priv *cx2072x = snd_soc_codec_get_drvdata(codec);
+#else
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct cx2072x_priv *cx2072x = snd_soc_component_get_drvdata(component);
+#endif
+	ucontrol->value.integer.value[0] = cx2072x->num_chan_sel;
+
+	return 0;
+}
+
+static int cx2072x_set_num_chan(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+#if (KERNEL_VERSION(3, 15, 0) > LINUX_VERSION_CODE)
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct cx2072x_priv *cx2072x = snd_soc_codec_get_drvdata(codec);
+#else
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct cx2072x_priv *cx2072x = snd_soc_component_get_drvdata(component);
+#endif
+	int ret = 0, sel = 0;
+	union REG_I2SPCM_CTRL_REG3 reg3;
+	int i2s_right_slot;
+
+	sel = ucontrol->value.integer.value[0];
+	if (sel == cx2072x->num_chan_sel)
+		return 0;
+
+	if (!cx2072x->frame_size)
+		i2s_right_slot = 2;
+	else
+		i2s_right_slot = (cx2072x->frame_size / 2) / BITS_PER_SLOT;
+
+	reg3.r.rx_slot_1 = 0;
+	if (sel)
+		reg3.r.rx_slot_2 = 0;
+	else
+		reg3.r.rx_slot_2 = i2s_right_slot;
+
+	regmap_update_bits(cx2072x->regmap, CX2072X_I2SPCM_CONTROL3, 0x0000ffc0,
+			   reg3.ulval);
+
+	cx2072x->num_chan_sel = sel;
+
+	return ret;
+}
+
+static const char * const num_chan_sel_text[] = {"Stereo", "Mono"};
+
+static const struct soc_enum num_chan_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(num_chan_sel_text), num_chan_sel_text),
+};
+
 #define CX2072X_PLBK_DRC_COEF(xname) \
 {	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
 	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE, \
@@ -1592,6 +1651,8 @@ static const struct snd_kcontrol_new cx2072x_snd_controls[] = {
 	CX2072X_CLASSD_LEVEL("Class-D Output Level"),
 	SOC_SINGLE("PortA HP Amp Switch", CX2072X_PORTA_PIN_CTRL, 7, 1, 0),
 	CX2072X_CODEC_POWER_CONTROL("Power Switch"),
+	SOC_ENUM_EXT("Number of Channels", num_chan_enum[0],
+		     cx2072x_get_num_chan, cx2072x_set_num_chan),
 };
 
 /*
@@ -1734,13 +1795,6 @@ static int cx2072x_hw_params(struct snd_pcm_substream *substream,
 	cx2072x->frame_size = frame_size;
 	cx2072x->sample_size = sample_size;
 	cx2072x->sample_rate = sample_rate;
-
-	if (dai->id == CX2072X_DAI_DSP) {
-		cx2072x->en_aec_ref = true;
-		dev_dbg(cx2072x->dev, "enables aec reference\n");
-		regmap_write(cx2072x->regmap,
-			     CX2072X_ADC1_CONNECTION_SELECT_CONTROL, 3);
-	}
 
 	if (cx2072x->pll_changed) {
 		cx2072x_config_pll(cx2072x);
@@ -2167,10 +2221,6 @@ static int cx2072x_init(struct snd_soc_codec *codec)
 
 	regmap_write(cx2072x->regmap, CX2072X_AFG_POWER_STATE, 0);
 
-	/* configre PortC as input device */
-	regmap_update_bits(cx2072x->regmap, CX2072X_PORTC_PIN_CTRL,
-			   0x20, 0x20);
-
 	cx2072x->plbk_eq_changed = true;
 	cx2072x->plbk_drc_changed = true;
 
@@ -2569,6 +2619,7 @@ static int cx2072x_dsp_dai_probe(struct snd_soc_dai *dai)
 	dev_dbg(cx2072x->dev, "dsp_dai_probe()\n");
 
 	cx2072x->en_aec_ref = true;
+	cx2072x->num_chan_sel = 1;
 	return 0;
 }
 
