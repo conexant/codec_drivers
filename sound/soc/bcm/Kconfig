@@ -145,3 +145,11 @@ config SND_BCM2708_SOC_CXSMTSPK_I2S
 	  Say Y or M if you want to add support for Conexant Smart Speaker to
           the CX2072X and CX2092X I2S interface.
 
+config SND_BCM2708_SOC_CX9000_I2S
+	tristate "Support for CX9000 EVK (I2S)"
+	depends on SND_BCM2708_SOC_I2S || SND_BCM2835_SOC_I2S
+	select SND_SOC_CX9000
+	select SND_SOC_CX2072X
+	help
+	  Say Y or M if you want to add support for Conexant Smart Speaker to
+          the CX9000 and CX2092X I2S interface.
