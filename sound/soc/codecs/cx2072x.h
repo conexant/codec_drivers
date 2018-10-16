@@ -9,9 +9,10 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  1/11/17
- *  File Version:   4.4.64
+ *  Modified Date:  10/15/18
+ *  File Version:   4.4.65
  ************************************************************************/
+#include <linux/version.h>
 #define NUM_OF_DAI 1
 #define CX2072X_MCLK_PLL 1
 #define CX2072X_MCLK_EXTERNAL_PLL 1
@@ -316,5 +317,10 @@ union REG_DIGITAL_BIOS_TEST2 {
 };
 
 int cx2072x_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio);
+#if (KERNEL_VERSION(4, 17, 0) <= LINUX_VERSION_CODE)
+int cx2072x_enable_jack_detect(struct snd_soc_component *codec);
+int cx2072x_get_jack_state(struct snd_soc_component *codec);
+#else
 int cx2072x_enable_jack_detect(struct snd_soc_codec *codec);
 int cx2072x_get_jack_state(struct snd_soc_codec *codec);
+#endif
