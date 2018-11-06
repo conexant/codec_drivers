@@ -9,12 +9,12 @@
  * published by the Free Software Foundation.
  *
  *************************************************************************
- *  Modified Date:  03/7/18
- *  File Version:   4.4.65.17
+ *  Modified Date:  05/11/18
+ *  File Version:   4.4.65.18
  ************************************************************************/
 
 #define DEBUG
-#define DRIVER_VERSION "4.4.65.17"
+#define DRIVER_VERSION "4.4.65.18"
 
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -2234,6 +2234,12 @@ static int cx9000_set_dac_config(struct snd_kcontrol *kcontrol,
 	case CX9000_BI_MONO:
 		val = CX9000_DAC_MONO | CX9000_DAC_DUPLICATE;
 		break;
+	case CX9000_MONO_MIXED:
+		val = CX9000_DAC_MONO_MIXED;
+		break;
+	case CX9000_BI_MIXED:
+		val = CX9000_DAC_MONO_MIXED | CX9000_DAC_DUPLICATE;
+		break;
 	}
 
 	/*
@@ -2378,7 +2384,8 @@ static char const * const sa2_mode_sel_text[] = {
 	"Fail-Safe",
 };
 static const char * const dac_config_text[] = {
-	"Stereo", "Mono Left", "Mono Right", "Bi-Mono"};
+	"Stereo", "Mono Left", "Mono Right",
+	"Bi-Mono", "Mono Mixed", "Bi-Mixed"};
 
 static const struct soc_enum band_mode_selection_enum =
 	SOC_ENUM_SINGLE(CX9000_TBDRC_CTRL_REG1, 0,
