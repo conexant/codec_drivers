@@ -40,8 +40,10 @@
 			"MIC", "Mic Jack";
 			simple-audio-card,widgets =
 			"Microphone", "Mic Jack";
-			simple-audio-card,bitclock-master = <&sound_master>;
-			simple-audio-card,frame-master = <&sound_master>;
+			simple-audio-card,bitclock-master =
+			<&sound_master>;
+			simple-audio-card,frame-master =
+			<&sound_master>;
 			status = "okay";
 			sound_master: simple-audio-card,cpu {
 				sound-dai = <&i2s>;
