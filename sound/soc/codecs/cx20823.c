@@ -206,41 +206,49 @@ static int cx20823_init(struct snd_soc_codec *codec)
 	regmap_write(cx20823->regmap, CX20823_PWR_CTRL_2, 0x18);
 
 	/*
-	 * setup PLL source, assume 12M MCLK feed to PLL -> source clock
-	 * source clock: assume 3.072Mhz from PLL
+	 * Example: PLL Settings for 12MHz input MCLK, INTEGER mode
+	 * 12 MHz --> div 5, multi 64, div 25, div 2 --> 3.072 MHz out (Source)
+	 *
+	 * Output Divider: 2 * (24 + 1) = 50
+	 * //regmap_write(cx20823->regmap, CX20823_PLL_CTRL_1, 0xC7);
+	 * Input Divider: (4 + 1) = 5
+	 * //regmap_write(cx20823->regmap, CX20823_PLL_CTRL_2, 0x64);
+	 * enable integer mode, feedback ratio: (63 + 1) = 64
+	 * //regmap_write(cx20823->regmap, CX20823_PLL_CTRL_3, 0x7F);
 	 */
-	regmap_write(cx20823->regmap, CX20823_PLL_CLK_CTRL, 0x01);
-	/*
-	 * setup I2S/DSP TX clock in Master mode,
-	 * source clock / [5:0]  = 3.072MHz / 2 = 1.576MHz
-	 */
-	//regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL,0x01);
-	//regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL,0xC1);
+
+	/* enable MCLK pad */
+	regmap_write(cx20823->regmap, CX20823_MCLK_PAD_CTRL, 0x01);
 
 	/*
-	 * PLL Settings for 12MHz input MCLK, INTEGER mode
-	 * 12 MHz --> div 5, multi 64, div 25, div 2 --> 3.072 MHz out (Source)
+	 * setup PLL source, assume 12.288M MCLK bypass PLL -> source clock
+	 * source clock: 12.288Mhz
 	 */
-	/* Output Divider: 2 * (24 + 1) = 50 */
-	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_1, 0xC7);
-	/* Input Divider: (4 + 1) = 5 */
-	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_2, 0x64);
-	/* enable integer mode, feedback ratio: (63 + 1) = 64 */
-	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_3, 0x7F);
+	regmap_write(cx20823->regmap, CX20823_PLL_CLK_CTRL, 0x03);
+
+	/*
+	 * setup I2S/DSP TX clock in Master mode,
+	 * source clock / [5:0]  = 12.288 MHz / 4 = 3.0726MHz
+	 */
+	//regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL,0x03);
+	//regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL,0x43);
+	//regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL,0xC3);
+
 	/*
 	 * setup ADC
-	 * Enable ADC and AMIC clocks, no divisor
-	 * (ADC Clock = source clk = 3.072MHz) for all sample rates
+	 * Enable ADC and AMIC clocks,
+	 * (ADC Clock = source clk /4 = 3.072MHz) for all sample rates
 	 */
-	regmap_write(cx20823->regmap, CX20823_ADC_CLK_CTRL, 0x09);
-	regmap_write(cx20823->regmap, CX20823_ADC_CLK_CTRL, 0x89);
+	regmap_write(cx20823->regmap, CX20823_ADC_CLK_CTRL, 0x3f);
+	regmap_write(cx20823->regmap, CX20823_ADC_CLK_CTRL, 0xbf);
 	/* Enable ADC and set 48kHz sample rate */
 	regmap_write(cx20823->regmap, CX20823_ADC_EN_CTRL, 0x09);
 	/* Disable DC filter bypass */
 	regmap_write(cx20823->regmap, CX20823_ADC_TEST_CTRL0, 0x00);
-	/* setup ADC PGA to 10db */
-	regmap_write(cx20823->regmap, CX20823_ADC_PGA_LSB, 0xA8);
+	/* setup ADC PGA to 0db */
+	regmap_write(cx20823->regmap, CX20823_ADC_PGA_LSB, 0x58);
 	regmap_write(cx20823->regmap, CX20823_ADC_PGA_MSB, 0x02);
+
 	/*
 	 * setup I2S tx format in I2S TDM mode
 	 */
@@ -254,16 +262,14 @@ static int cx20823_init(struct snd_soc_codec *codec)
 	regmap_write(cx20823->regmap, CX20823_I2SDSP_CTRL_REG4, 0x01);
 	/* I2S TX is Slave mode */
 	regmap_write(cx20823->regmap, CX20823_I2S_TX_PAD_CTRL, 0x0f);
+
 	/*
 	 * Enable all ANA function,
 	 * High Power Mode, Enable PLL, VREFP, PGA, AAF, DSM
 	 */
 	regmap_write(cx20823->regmap, CX20823_ANA_CTRL_1, 0x1F);
-	/* setup Mic Boost (PGA) to 6db */
-	regmap_write(cx20823->regmap, CX20823_ANA_CTRL_2, 0x02);
-
-	/* enable MCLK pad */
-	regmap_write(cx20823->regmap, CX20823_MCLK_PAD_CTRL, 0x03);
+	/* setup Mic Boost (PGA) to 0db */
+	regmap_write(cx20823->regmap, CX20823_ANA_CTRL_2, 0x01);
 
 	/* setup gpio1 */
 	regmap_write(cx20823->regmap, CX20823_GPIO1_PAD_CTRL, 0x00);
