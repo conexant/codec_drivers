@@ -138,14 +138,19 @@ static int cx2081x_init(struct snd_soc_codec *codec)
 	regmap_write(cx2081x->regmap, CX2081X_SOFT_RST_CTRL, 0x02);
 	regmap_write(cx2081x->regmap, CX2081X_SOFT_RST_CTRL, 0x00);
 
-	/* setup PLL, assume 12.288M feed to PLL  */
+	/* setup PLL, 24.576MHzM feed to PLL  */
 	regmap_write(cx2081x->regmap, CX2081X_MCLK_PAD_CTRL, 0x03);
-	/* MCLK !gated */
-	regmap_write(cx2081x->regmap, CX2081X_MCLK_CTRL, 0x20);
+	/* MCLK !gated set MCLK/2 to feed to PLL */
+	regmap_write(cx2081x->regmap, CX2081X_MCLK_CTRL, 0x31);
+	regmap_write(cx2081x->regmap, CX2081X_MCLK_CTRL, 0x39);
 	/* use MCLK directly as SYS_CLK */
 	regmap_write(cx2081x->regmap, CX2081X_PLL_CLK_CTRL, 0x03);
-	/* PLL1 bypass, 12.288 for DSP clocks and AIF clocks (digital blocks) */
+	/* PLL1 bypass, 12.288 (MCLK/2) for DSP clocks and
+	 * AIF clocks (digital blocks)
+	 */
 	regmap_write(cx2081x->regmap, CX2081X_PLL_CTRL_1, 0x04);
+	/* enable 1.8V LDO for PLL */
+	regmap_write(cx2081x->regmap, CX2081X_PWR_CTRL_1, 0x01);
 
 	/* enable VREF for ANA LDO and micbias */
 	regmap_write(cx2081x->regmap, CX2081X_REF_CTRL_1, 0x2d);
@@ -199,7 +204,7 @@ static int cx2081x_init(struct snd_soc_codec *codec)
 	regmap_write(cx2081x->regmap, CX2081X_ADC_EN_CTRL, 0x00);
 	/* Enable ADC clock */
 	regmap_write(cx2081x->regmap, CX2081X_ADC_CLK_CTRL, 0x1f);
-	regmap_write(cx2081x->regmap, CX2081X_ADC_EN_CTRL, 0x1f);
+	regmap_write(cx2081x->regmap, CX2081X_ADC_EN_CTRL, 0x4f);
 	/* Enable all ADC clock, digital and mic clock*/
 	regmap_write(cx2081x->regmap, CX2081X_ADC_CLK_CTRL, 0x5f);
 
