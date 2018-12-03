@@ -32,10 +32,18 @@
 
 #define CXDBG_REG_DUMP
 
+#if 0
 #define CX2081X_FORMATS (SNDRV_PCM_FMTBIT_S8 | \
 			 SNDRV_PCM_FMTBIT_S16_LE | \
 			 SNDRV_PCM_FMTBIT_S24_LE)
+#else
+/*
+ * In case SoC doesn't support TDM for 4 channels of 16 bits audio,
+ * we extend frame size to 64 bit I2S signal.
+ */
+#define CX2081X_FORMATS SNDRV_PCM_FMTBIT_S32_LE
 
+#endif
 /* codec private data*/
 struct cx2081x_priv {
 	struct snd_soc_codec *codec;
@@ -188,11 +196,16 @@ static int cx2081x_init(struct snd_soc_codec *codec)
 	regmap_write(cx2081x->regmap, CX2081X_DSP_CTRL, 0x0b);
 
 	/* slot number for each channel */
-	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_1, 0x00); //slot ch1
-	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_2, 0x02); //slot ch2
-	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_3, 0x04); //slot ch3
-	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_4, 0x06); //slot ch4
-	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_5, 0x0f); //enable 4ch
+	/* ADC1 assign to 1st CH, L1 */
+	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_1, 0x00);
+	/* ADC2 assign to 3rd CH, R1 */
+	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_2, 0x04);
+	/* ADC3 assign to 2nd CH, L2 */
+	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_3, 0x02);
+	/* ADC4 assign to 4th CH, R2 */
+	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_4, 0x06);
+	/* enable TX1-4. */
+	regmap_write(cx2081x->regmap, CX2081X_DSP_TX_CTRL_5, 0x0f);
 
 	/* Setup ADC1~4 PGA 24db */
 	regmap_write(cx2081x->regmap, CX2081X_ADC1_ANALOG_PGA, 0x30);
@@ -315,7 +328,7 @@ static struct snd_soc_dai_driver soc_codec_cx2081x_dai[] = {
 		.id = 0,
 		.capture = {
 			.stream_name = "Capture",
-			.channels_min = 4,
+			.channels_min = 2,
 			.channels_max = 4,
 			.rates = SNDRV_PCM_RATE_8000_96000,
 			.formats = CX2081X_FORMATS,
