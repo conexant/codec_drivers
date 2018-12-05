@@ -57,20 +57,19 @@ static int cx2081x_reg_write(void *context, unsigned int reg,
 			    unsigned int value)
 {
 	struct i2c_client *client = context;
-	u8 buf[3];
+	u8 buf[2];
 	int ret;
 	struct device *dev = &client->dev;
 
 #ifdef CXDBG_REG_DUMP
-	dev_dbg(dev, "I2C write address 0x%04x <= %02x\n",
+	dev_dbg(dev, "I2C write address 0x%02x <= %02x\n",
 		reg, value);
 #endif
 
-	buf[0] = reg >> 8;
-	buf[1] = reg & 0xff;
-	buf[2] = value;
+	buf[0] = reg & 0xff;
+	buf[1] = value;
 
-	ret = i2c_master_send(client, buf, 3);
+	ret = i2c_master_send(client, buf, 2);
 	if (ret == 3) {
 		ret =  0;
 	} else if (ret < 0) {
@@ -86,14 +85,13 @@ static int cx2081x_reg_read(void *context, unsigned int reg,
 			   unsigned int *value)
 {
 	int ret;
-	u8 send_buf[2];
+	u8 send_buf[1];
 	unsigned int recv_buf = 0;
 	struct i2c_client *client = context;
 	struct i2c_msg msgs[2];
 	struct device *dev = &client->dev;
 
-	send_buf[0] = reg >> 8;
-	send_buf[1] = reg & 0xff;
+	send_buf[0] = reg & 0xff;
 
 	msgs[0].addr = client->addr;
 	msgs[0].len = sizeof(send_buf);
@@ -120,7 +118,7 @@ static int cx2081x_reg_read(void *context, unsigned int reg,
 
 #ifdef CXDBG_REG_DUMP
 	dev_dbg(dev,
-		"I2C read address 0x%04x => %02x\n",
+		"I2C read address 0x%02x => %02x\n",
 		reg, *value);
 #endif
 	return 0;
@@ -185,7 +183,7 @@ static int cx2081x_init(struct snd_soc_codec *codec)
 	regmap_write(cx2081x->regmap, CX2081X_ADC_TEST_CTRL0, 0x00);
 	/* TX Slave mode and enable clock for ADC3 and ADC4 */
 	//regmap_write(cx2081x->regmap, CX2081X_I2S_CLK_CTRL, 0x0e);
-	regmap_write(cx2081x->regmap, CX2081X_I2S_CLK_CTRL, 0x0c);
+	regmap_write(cx2081x->regmap, CX2081X_I2S_CLK_CTRL, 0x0A);
 	/* enable i2s tx pad */
 	regmap_write(cx2081x->regmap, CX2081X_I2S_TX_PAD_CTRL, 0x0f);
 	/* 16bit I2S TDM mode */
