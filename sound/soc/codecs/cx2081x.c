@@ -70,7 +70,7 @@ static int cx2081x_reg_write(void *context, unsigned int reg,
 	buf[1] = value;
 
 	ret = i2c_master_send(client, buf, 2);
-	if (ret == 3) {
+	if (ret == 2) {
 		ret =  0;
 	} else if (ret < 0) {
 		dev_err(dev, "I2C write address failed, error = %d\n", ret);
