@@ -112,21 +112,20 @@ static int cx20823_reg_write(void *context, unsigned int reg,
 			    unsigned int value)
 {
 	struct i2c_client *client = context;
-	u8 buf[3];
+	u8 buf[2];
 	int ret;
 	struct device *dev = &client->dev;
 
 #ifdef CXDBG_REG_DUMP
-	dev_dbg(dev, "I2C write address 0x%04x <= %02x\n",
+	dev_dbg(dev, "I2C write address 0x%02x <= %02x\n",
 		reg, value);
 #endif
 
-	buf[0] = reg >> 8;
-	buf[1] = reg & 0xff;
-	buf[2] = value;
+	buf[0] = reg & 0xff;
+	buf[1] = value;
 
-	ret = i2c_master_send(client, buf, 3);
-	if (ret == 3) {
+	ret = i2c_master_send(client, buf, 2);
+	if (ret == 2) {
 		ret =  0;
 	} else if (ret < 0) {
 		dev_err(dev, "I2C write address failed, error = %d\n", ret);
@@ -141,14 +140,13 @@ static int cx20823_reg_read(void *context, unsigned int reg,
 			   unsigned int *value)
 {
 	int ret;
-	u8 send_buf[2];
+	u8 send_buf[1];
 	unsigned int recv_buf = 0;
 	struct i2c_client *client = context;
 	struct i2c_msg msgs[2];
 	struct device *dev = &client->dev;
 
-	send_buf[0] = reg >> 8;
-	send_buf[1] = reg & 0xff;
+	send_buf[0] = reg & 0xff;
 
 	msgs[0].addr = client->addr;
 	msgs[0].len = sizeof(send_buf);
@@ -196,51 +194,26 @@ static int cx20823_init(struct snd_soc_codec *codec)
 	dev_dbg(codec->dev, "%s: Device ID = 0x04%x, Revision ID = 0x04%x\n",
 		__func__, device_id, revision_id);
 
-	/* soft reset */
-	regmap_write(cx20823->regmap, CX20823_SOFT_RST_CTRL, 0x07);
-	msleep(20);
-	regmap_write(cx20823->regmap, CX20823_SOFT_RST_CTRL, 0x00);
-	msleep(20);
 
 	/* enable ANA_LDO and Clamp filter */
 	regmap_write(cx20823->regmap, CX20823_PWR_CTRL_2, 0x18);
-
 	/*
-	 * Example: PLL Settings for 12MHz input MCLK, INTEGER mode
-	 * 12 MHz --> div 5, multi 64, div 25, div 2 --> 3.072 MHz out (Source)
-	 *
-	 * Output Divider: 2 * (24 + 1) = 50
-	 * //regmap_write(cx20823->regmap, CX20823_PLL_CTRL_1, 0xC7);
-	 * Input Divider: (4 + 1) = 5
-	 * //regmap_write(cx20823->regmap, CX20823_PLL_CTRL_2, 0x64);
-	 * enable integer mode, feedback ratio: (63 + 1) = 64
-	 * //regmap_write(cx20823->regmap, CX20823_PLL_CTRL_3, 0x7F);
+	 * setup PLL source, assume 24.576 MCLK
 	 */
+	regmap_write(cx20823->regmap, CX20823_PLL_CLK_CTRL, 0x01);
 
-	/* enable MCLK pad */
-	regmap_write(cx20823->regmap, CX20823_MCLK_PAD_CTRL, 0x01);
-
-	/*
-	 * setup PLL source, assume 12.288M MCLK bypass PLL -> source clock
-	 * source clock: 12.288Mhz
-	 */
-	regmap_write(cx20823->regmap, CX20823_PLL_CLK_CTRL, 0x03);
-
-	/*
-	 * setup I2S/DSP TX clock in Master mode,
-	 * source clock / [5:0]  = 12.288 MHz / 4 = 3.0726MHz
-	 */
-	//regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL,0x03);
-	//regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL,0x43);
-	//regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL,0xC3);
+	/* Enable TX clock=Source Clock /2 = 1.536MHz*/
+	regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL, 0x01);
+	/* Enable TX clock*/
+	regmap_write(cx20823->regmap, CX20823_I2S_TX_CLK_CTRL, 0xc1);
 
 	/*
 	 * setup ADC
 	 * Enable ADC and AMIC clocks,
 	 * (ADC Clock = source clk /4 = 3.072MHz) for all sample rates
 	 */
-	regmap_write(cx20823->regmap, CX20823_ADC_CLK_CTRL, 0x3f);
-	regmap_write(cx20823->regmap, CX20823_ADC_CLK_CTRL, 0xbf);
+	regmap_write(cx20823->regmap, CX20823_ADC_CLK_CTRL, 0x09);
+	regmap_write(cx20823->regmap, CX20823_ADC_CLK_CTRL, 0x89);
 	/* Enable ADC and set 48kHz sample rate */
 	regmap_write(cx20823->regmap, CX20823_ADC_EN_CTRL, 0x09);
 	/* Disable DC filter bypass */
@@ -252,28 +225,36 @@ static int cx20823_init(struct snd_soc_codec *codec)
 	/*
 	 * setup I2S tx format in I2S TDM mode
 	 */
-	/* sample size: 16bit, frame length: 64bit */
-	regmap_write(cx20823->regmap, CX20823_I2SDSP_CTRL_REG1, 0x1D);
+	/* LRCK (Frame) = BCK /48 =32; Set 16 bits */
+	regmap_write(cx20823->regmap, CX20823_I2SDSP_CTRL_REG1, 0x0D);
 	/* TX_LRCK = 1/2 frame length, 32bit */
-	regmap_write(cx20823->regmap, CX20823_I2SDSP_CTRL_REG2, 0x7C);
+	regmap_write(cx20823->regmap, CX20823_I2SDSP_CTRL_REG2, 0x3C);
 	/* Delay TX data 1 bit, I2S TDM mode and Slave mode */
-	regmap_write(cx20823->regmap, CX20823_I2SDSP_CTRL_REG3, 0x01);
+	regmap_write(cx20823->regmap, CX20823_I2SDSP_CTRL_REG3, 0x05);
 	/* enbale Tx ch1 and begin tx data in slot 0 */
 	regmap_write(cx20823->regmap, CX20823_I2SDSP_CTRL_REG4, 0x01);
-	/* I2S TX is Slave mode */
-	regmap_write(cx20823->regmap, CX20823_I2S_TX_PAD_CTRL, 0x0f);
-
-	/*
-	 * Enable all ANA function,
-	 * High Power Mode, Enable PLL, VREFP, PGA, AAF, DSM
-	 */
-	regmap_write(cx20823->regmap, CX20823_ANA_CTRL_1, 0x1F);
-	/* setup Mic Boost (PGA) to 0db */
+	regmap_write(cx20823->regmap, CX20823_ANA_CTRL_1, 0x1f);
+	/* Set +0dB analog PGA*/
 	regmap_write(cx20823->regmap, CX20823_ANA_CTRL_2, 0x01);
 
-	/* setup gpio1 */
-	regmap_write(cx20823->regmap, CX20823_GPIO1_PAD_CTRL, 0x00);
-	regmap_write(cx20823->regmap, CX20823_GPIO1_PAD_CTRL, 0x01);
+	/* Output divider =16*/
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_1, 0x04);
+	/* Input divide bypass*/
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_2, 0x00);
+	/* FB Divider integer part =2; INTG mode*/
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_3, 0x40);
+
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_4, 0x00);
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_5, 0x00);
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_6, 0x00);
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_7, 0x00);
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_8, 0x00);
+	regmap_write(cx20823->regmap, CX20823_PLL_CTRL_9, 0x00);
+
+	/* MCLK Enabled*/
+	regmap_write(cx20823->regmap, CX20823_MCLK_PAD_CTRL, 0x03);
+	/* I2S TX BCLK and lrclk are inputs (Slave)*/
+	regmap_write(cx20823->regmap, CX20823_I2S_TX_PAD_CTRL, 0x0f);
 
 	return ret;
 
