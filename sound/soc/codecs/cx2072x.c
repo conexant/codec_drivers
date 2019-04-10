@@ -13,7 +13,7 @@
  *  File Version:   4.4.65
  ************************************************************************/
 #define DEBUG
-#define DRIVER_VERSION "4.4.65"
+#define DRIVER_VERSION "4.4.66"
 /*#define ENABLE_MIC_POP_WA*/
 #define CXDBG_REG_DUMP
 
@@ -1378,16 +1378,17 @@ static int cx2072x_classd_level_put(struct snd_kcontrol *kcontrol,
 	struct cx2072x_priv *cx2072x = cx2072x_kcontrol_get_drvdata(kcontrol);
 	u8 *param = ucontrol->value.bytes.data;
 	u8 *cache = cx2072x->classd_amp;
+	u16 val;
 
 	memcpy(cache, param, CX2072X_CLASSD_AMP_LEN);
-
 	/* Config Power Averaging */
-	cx2072x_reg_bulk_write(cx2072x, CX2072X_ANALOG_TEST10,
-			       &cx2072x->classd_amp[0], 2);
-	cx2072x_reg_bulk_write(cx2072x, CX2072X_CODEC_TEST20,
-			       &cx2072x->classd_amp[2], 2);
-	cx2072x_reg_bulk_write(cx2072x, CX2072X_CODEC_TEST26,
-			       &cx2072x->classd_amp[4], 2);
+	val = cx2072x->classd_amp[0] | (u16)cx2072x->classd_amp[1] << 8;
+	regmap_write(cx2072x->regmap, CX2072X_ANALOG_TEST10, val);
+	val = cx2072x->classd_amp[2] | (u16)cx2072x->classd_amp[3] << 8;
+	regmap_write(cx2072x->regmap, CX2072X_CODEC_TEST20, val);
+	val = cx2072x->classd_amp[4] | (u16)cx2072x->classd_amp[5] << 8;
+	regmap_write(cx2072x->regmap, CX2072X_CODEC_TEST26, val);
+
 	return 0;
 }
 
