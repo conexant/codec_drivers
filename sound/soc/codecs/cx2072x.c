@@ -2069,6 +2069,8 @@ static const struct snd_soc_dapm_widget cx2072x_dapm_widgets[] = {
 
 	/*Capture*/
 	SND_SOC_DAPM_AIF_OUT("Out AIF", "Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("DSPDUAL AIF", "DSPDUAL Capture", 0,
+			     SND_SOC_NOPM, 0, 0),
 
 	SND_SOC_DAPM_SWITCH("I2S ADC1L", SND_SOC_NOPM, 0, 0, &i2sadc1l_ctl),
 	SND_SOC_DAPM_SWITCH("I2S ADC1R", SND_SOC_NOPM, 0, 0, &i2sadc1r_ctl),
@@ -2110,6 +2112,7 @@ static const struct snd_soc_dapm_widget cx2072x_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("PORTC"),
 	SND_SOC_DAPM_INPUT("PORTD"),
 	SND_SOC_DAPM_INPUT("PORTEIN"),
+	SND_SOC_DAPM_INPUT("MIC"),
 };
 
 static const struct snd_soc_dapm_route cx2072x_intercon[] = {
@@ -2182,6 +2185,7 @@ static const struct snd_soc_dapm_route cx2072x_intercon[] = {
 	{"Out AIF", NULL, "I2S ADC2R"},
 	{"Out AIF", NULL, "AFG Power"},
 	{"AEC REF", NULL, "Out AIF"},
+	{"DSPDUAL AIF", NULL, "MIC"},
 };
 
 
@@ -2682,6 +2686,26 @@ static struct snd_soc_dai_driver soc_codec_cx2072x_dai[] = {
 		.probe = cx2072x_dsp_dai_probe,
 		.playback = {
 			.stream_name = "Playback",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = CX2072X_RATES_DSP,
+			.formats = CX2072X_FORMATS,
+		},
+		.ops = &cx2072x_dai_ops,
+	},
+	{ /* plabayck and a virtual record */
+		.name = "cx2072x-dsp-dual",
+		.id	= CX2072X_DAI_DSP_DUAL,
+		.probe = cx2072x_dsp_dai_probe,
+		.playback = {
+			.stream_name = "Playback",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = CX2072X_RATES_DSP,
+			.formats = CX2072X_FORMATS,
+		},
+		.capture = {
+			.stream_name = "DSPDUAL Capture",
 			.channels_min = 2,
 			.channels_max = 2,
 			.rates = CX2072X_RATES_DSP,

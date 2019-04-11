@@ -1,0 +1,74 @@
+// Definitions for audioinjector.net audio add on soundcard
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2708";
+
+	fragment@0 {
+		target = <&i2s>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			cx20721: cx20721@33{
+				#sound-dai-cells = <1>;
+				compatible = "cnxt,cx20721";
+				reg = <0x33>;
+				status = "okay";
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&sound>;
+		__overlay__ {
+			compatible = "simple-audio-card";
+			pinctrl-names = "default";
+			pinctrl-0 = <&jack_det_pins>;
+			simple-audio-card,name = "cx-smart-speaker";
+			simple-audio-card,routing =
+			"Headphones", "PORTA",
+			"Speakers", "PORTG";
+			simple-audio-card,widgets =
+			"Headphone", "Headphones",
+			"Speaker", "Speakers";
+			simple-audio-card,hp-det-gpio = <&gpio 25 1>;
+			status = "okay";
+			/* I2S1 - CX2072X-DSP */
+			simple-audio-card,dai-link@0 {
+				format = "i2s";
+				bitclock-master = <&dailink0_master>;
+				frame-master = <&dailink0_master>;
+				cpu {
+					sound-dai = <&i2s>;
+					system-clock-frequency = <12288000>;
+					system-clock-direction = "in";
+				};
+				dailink0_master: codec {
+					sound-dai = <&cx20721 2>;
+					system-clock-frequency = <12288000>;
+				};
+			};
+		};
+	};
+
+	fragment@3 {
+		target = <&gpio>;
+		__overlay__ {
+			jack_det_pins: jack_det_pins {
+				brcm,pins = <25>;
+				brcm,function = <0>; /* in */
+				brcm,pull = <2>; /* upe */
+			};
+		};
+	};
+};

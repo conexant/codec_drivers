@@ -181,6 +181,7 @@
 
 #define CX2072X_DAI_HIFI 1
 #define CX2072X_DAI_DSP  2
+#define CX2072X_DAI_DSP_DUAL 4
 /*4 ch, including mic and aec*/
 #define CX2072X_DAI_DSP_PWM 3
 

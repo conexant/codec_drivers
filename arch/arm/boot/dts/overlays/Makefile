@@ -25,6 +25,7 @@ dtbo-$(RPI_DT_OVERLAYS) += rpi-cxsmartspk-usb.dtbo
 dtbo-$(RPI_DT_OVERLAYS) += rpi-cxsmartspk-usb-plus.dtbo
 dtbo-$(RPI_DT_OVERLAYS) += rpi-cxsmartspk-i2s.dtbo
 dtbo-$(RPI_DT_OVERLAYS) += rpi-cxsmartspk2-i2s-plus.dtbo
+dtbo-$(RPI_DT_OVERLAYS) += rpi-cxsmartspk-i2s-dspdual.dtbo
 dtbo-$(RPI_DT_OVERLAYS) += rpi-cxsmartspk-i2s-cx2081x.dtbo
 dtbo-$(RPI_DT_OVERLAYS) += rpi-cxsmartspk-i2s-cx20823.dtbo
 dtbo-$(RPI_DT_OVERLAYS) += dht11.dtbo
