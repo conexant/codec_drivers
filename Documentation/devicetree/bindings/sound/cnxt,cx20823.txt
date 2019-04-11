@@ -1,0 +1,15 @@
+Conexant CX20823 Mono ADC
+
+The devices supports the I2C bus.
+
+Required properties:
+
+  - compatible: One of "cnxt,cx20823".
+  - reg: The I2C address of the device for I2C, it should be <0x44>
+
+Example:
+
+codec_i2c: cx20823@44 {
+	compatible = "cnxt,cx20823";
+	reg = <0x44>;
+};

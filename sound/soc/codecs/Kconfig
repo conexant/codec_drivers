@@ -58,6 +58,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_CX20442 if TTY
 	select SND_SOC_CX2072X if I2C
 	select SND_SOC_CX9000 if I2C
+	select SND_SOC_CX20823 if I2C
 	select SND_SOC_CX2081X if I2C
 	select SND_SOC_DA7210 if SND_SOC_I2C_AND_SPI
 	select SND_SOC_DA7213 if I2C
@@ -438,6 +439,10 @@ config SND_SOC_CX2072X
 
 config SND_SOC_CX9000
         tristate "Conexant CX9000 AMPLIFIER"
+        depends on I2C
+
+config SND_SOC_CX20823
+        tristate "Conexant CX20823 Mono ADC"
         depends on I2C
 
 config SND_SOC_CX2081X
