@@ -1,0 +1,15 @@
+Conexant CX2081X HD Voice Capture
+
+The devices supports the I2C bus.
+
+Required properties:
+
+  - compatible: One of "cnxt,cx20811".
+  - reg: The I2C address of the device for I2C, it should be <0x3B>
+
+Example:
+
+codec_i2c: cx20811@3b {
+	compatible = "cnxt,cx20811";
+	reg = <0x3b>;
+};
