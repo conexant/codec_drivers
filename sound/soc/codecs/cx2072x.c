@@ -13,7 +13,7 @@
  *  File Version:   4.4.65
  ************************************************************************/
 #define DEBUG
-#define DRIVER_VERSION "4.4.66"
+#define DRIVER_VERSION "4.4.67"
 /*#define ENABLE_MIC_POP_WA*/
 #define CXDBG_REG_DUMP
 
@@ -189,6 +189,7 @@ static const struct CX2072X_REG_DEF cx2072x_regs[] = {
 	_REG(CX2072X_SPKR_DRC_TEST,		     4, RW, NV),
 	_REG(CX2072X_DIGITAL_BIOS_TEST0,	     4, RW, NV),
 	_REG(CX2072X_DIGITAL_BIOS_TEST2,	     4, RW, NV),
+	_REG(CX2072X_SPKR_REF_ENABLE,		     1, RW, NV),
 	_REG(CX2072X_I2SPCM_CONTROL1,		     4, RW, NV),
 	_REG(CX2072X_I2SPCM_CONTROL2,		     4, RW, NV),
 	_REG(CX2072X_I2SPCM_CONTROL3,		     4, RW, NV),
@@ -196,6 +197,7 @@ static const struct CX2072X_REG_DEF cx2072x_regs[] = {
 	_REG(CX2072X_I2SPCM_CONTROL5,		     4, RW, NV),
 	_REG(CX2072X_I2SPCM_CONTROL6,		     4, RW, NV),
 	_REG(CX2072X_UM_INTERRUPT_CRTL_E,	     4, RW, NV),
+	_REG(CX2072X_CODEC_TEST7,		     2, RW, NV),
 	_REG(CX2072X_CODEC_TEST20,		     2, RW, NV),
 	_REG(CX2072X_CODEC_TEST26,		     2, RW, NV),
 	_REG(CX2072X_ANALOG_TEST4,		     2, RW, NV),
@@ -422,6 +424,7 @@ static const struct reg_default cx2072x_reg_defaults[] = {
 	{ CX2072X_I2SPCM_CONTROL6, 0x00000000 },
 	{ CX2072X_UM_INTERRUPT_CRTL_E, 0x00000000 },
 	{ CX2072X_CODEC_TEST2, 0x00000000 },
+	{ CX2072X_CODEC_TEST7, 0x00000000 },
 	{ CX2072X_CODEC_TEST9, 0x00000004 },
 	{ CX2072X_CODEC_TEST20, 0x00000600 },
 	{ CX2072X_CODEC_TEST26, 0x00000208 },
@@ -509,6 +512,7 @@ static unsigned int cx2072x_register_size(struct device *dev, unsigned int reg)
 	case CX2072X_ADC1_CONVERTER_FORMAT:
 	case CX2072X_ADC2_CONVERTER_FORMAT:
 	case CX2072X_CODEC_TEST2:
+	case CX2072X_CODEC_TEST7:
 	case CX2072X_CODEC_TEST9:
 	case CX2072X_CODEC_TEST20:
 	case CX2072X_CODEC_TEST26:
@@ -947,10 +951,14 @@ static int cx2072x_config_i2spcm(struct cx2072x_priv *cx2072x)
 		reg2.r.tx_slot_1 = 0;
 		reg2.r.tx_slot_2 = i2s_right_slot;
 		reg3.r.rx_slot_1 = 0;
-		if (cx2072x->en_aec_ref && cx2072x->num_chan_sel)
+		reg3.r.rx_slot_3 = 0;
+		if (cx2072x->en_aec_ref && cx2072x->num_chan_sel) {
 			reg3.r.rx_slot_2 = 0;
-		else
+			reg3.r.rx_slot_4 = 0;
+		} else {
 			reg3.r.rx_slot_2 = i2s_right_slot;
+			reg3.r.rx_slot_4 = i2s_right_slot;
+		}
 		reg6.r.rx_pause_start_pos = i2s_right_pause_pos;
 		reg6.r.rx_pause_cycles = i2s_right_pause_interval;
 		reg6.r.tx_pause_start_pos = i2s_right_pause_pos;
@@ -1513,12 +1521,16 @@ static int cx2072x_set_num_chan(struct snd_kcontrol *kcontrol,
 		i2s_right_slot = (cx2072x->frame_size / 2) / BITS_PER_SLOT;
 
 	reg3.r.rx_slot_1 = 0;
-	if (sel)
+	reg3.r.rx_slot_3 = 0;
+	if (sel) {
 		reg3.r.rx_slot_2 = 0;
-	else
+		reg3.r.rx_slot_4 = 0;
+	} else {
 		reg3.r.rx_slot_2 = i2s_right_slot;
+		reg3.r.rx_slot_4 = i2s_right_slot;
+	}
 
-	regmap_update_bits(cx2072x->regmap, CX2072X_I2SPCM_CONTROL3, 0x0000ffc0,
+	regmap_update_bits(cx2072x->regmap, CX2072X_I2SPCM_CONTROL3, 0x03ffffc0,
 			   reg3.ulval);
 
 	cx2072x->num_chan_sel = sel;
@@ -2532,6 +2544,7 @@ static bool cx2072x_readable_register(struct device *dev, unsigned int reg)
 	case CX2072X_SPKR_DRC_TEST:
 	case CX2072X_DIGITAL_BIOS_TEST0:
 	case CX2072X_DIGITAL_BIOS_TEST2:
+	case CX2072X_SPKR_REF_ENABLE:
 	case CX2072X_I2SPCM_CONTROL1:
 	case CX2072X_I2SPCM_CONTROL2:
 	case CX2072X_I2SPCM_CONTROL3:
@@ -2540,6 +2553,7 @@ static bool cx2072x_readable_register(struct device *dev, unsigned int reg)
 	case CX2072X_I2SPCM_CONTROL6:
 	case CX2072X_UM_INTERRUPT_CRTL_E:
 	case CX2072X_CODEC_TEST2:
+	case CX2072X_CODEC_TEST7:
 	case CX2072X_CODEC_TEST9:
 	case CX2072X_CODEC_TEST20:
 	case CX2072X_CODEC_TEST26:
